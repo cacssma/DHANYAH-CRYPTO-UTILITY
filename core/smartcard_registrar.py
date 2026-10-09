@@ -128,10 +128,34 @@ CARD_DEFINITIONS = {
     "proxkey": {
         "name": "WD_Ultimate Key Minidriver",
         "atr": bytes.fromhex("3b6d000057443641018693000000000000"),
-        "atr_mask": bytes.fromhex("fffffffffffffffffffff00000000000"),
+        "atr_mask": bytes.fromhex("ffffffffffffffffffffff000000000000"),
         "crypto_provider": "PROXKey CSP India V3.0",
         "ksp": "Microsoft Smart Card Key Storage Provider",
         "csp_name": "PROXKey CSP India V3.0",
+        "csp_image": r"C:\Windows\system32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_image_64": r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_image_32": r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_type": 1,
+    },
+    "proxkey_v2": {
+        "name": "WD_Ultimate Key Minidriver V2",
+        "atr": bytes.fromhex("3b6d000057443641018693000000000000"),
+        "atr_mask": bytes.fromhex("ffffffffffffffffffffff000000000000"),
+        "crypto_provider": "PROXKey CSP India V2.0",
+        "ksp": "Microsoft Smart Card Key Storage Provider",
+        "csp_name": "PROXKey CSP India V2.0",
+        "csp_image": r"C:\Windows\system32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_image_64": r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_image_32": r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_type": 1,
+    },
+    "proxkey_v1": {
+        "name": "WD_Ultimate Key Minidriver V1",
+        "atr": bytes.fromhex("3b6d000057443641018693000000000000"),
+        "atr_mask": bytes.fromhex("ffffffffffffffffffffff000000000000"),
+        "crypto_provider": "PROXKey CSP India V1.0",
+        "ksp": "Microsoft Smart Card Key Storage Provider",
+        "csp_name": "PROXKey CSP India V1.0",
         "csp_image": r"C:\Windows\system32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
         "csp_image_64": r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
         "csp_image_32": r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
@@ -161,6 +185,37 @@ class SmartCardRegistrar:
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except Exception:
+            return False
+
+    @staticmethod
+    def elevate_process() -> bool:
+        """Relaunches the current process with Windows Administrator (UAC) privileges."""
+        try:
+            if sys.platform != "win32":
+                return False
+            if SmartCardRegistrar.is_admin():
+                return True
+
+            if getattr(sys, "frozen", False):
+                executable = sys.executable
+                params = " ".join([f'"{arg}"' for arg in sys.argv[1:]])
+            else:
+                executable = sys.executable
+                script = os.path.abspath(sys.argv[0])
+                args = [f'"{script}"'] + [f'"{arg}"' for arg in sys.argv[1:]]
+                params = " ".join(args)
+
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                executable,
+                params,
+                None,
+                1,  # SW_SHOWNORMAL
+            )
+            return ret > 32
+        except Exception as e:
+            logger.error(f"UAC elevation failed: {e}")
             return False
 
     @staticmethod
@@ -387,27 +442,36 @@ class SmartCardRegistrar:
                     fp = os.path.join(prox_src, f)
                     if os.path.isfile(fp):
                         _safe_copy(fp, os.path.join(prox_dest, f))
+                # Direct WDPKCS.dll in System32 for 64-bit apps
+                if os.path.isfile(os.path.join(prox_src, "WDPKCS.dll")):
+                    _safe_copy(os.path.join(prox_src, "WDPKCS.dll"), os.path.join(system32, "WDPKCS.dll"))
+
                 if has_wow64:
                     prox_dest_32 = os.path.join(syswow64, "Watchdata", "PROXKey CSP India V3.0")
                     os.makedirs(prox_dest_32, exist_ok=True)
-                    for f in os.listdir(prox_src):
-                        fp = os.path.join(prox_src, f)
+                    prox_src_32 = os.path.join(prox_src, "x86")
+                    src_dir_32 = prox_src_32 if os.path.isdir(prox_src_32) else prox_src
+                    for f in os.listdir(src_dir_32):
+                        fp = os.path.join(src_dir_32, f)
                         if os.path.isfile(fp):
                             _safe_copy(fp, os.path.join(prox_dest_32, f))
+                    # Direct 32-bit WDPKCS.dll in SysWOW64 for 32-bit emBridge and emSigner
+                    if os.path.isfile(os.path.join(src_dir_32, "WDPKCS.dll")):
+                        _safe_copy(os.path.join(src_dir_32, "WDPKCS.dll"), os.path.join(syswow64, "WDPKCS.dll"))
 
-            # InnaIT files
+            # InnaIT files (64-bit only)
             innait_src = os.path.join(drivers_source_dir, "innait")
             if os.path.isdir(innait_src):
                 for f in os.listdir(innait_src):
                     fp = os.path.join(innait_src, f)
                     if os.path.isfile(fp):
                         _safe_copy(fp, os.path.join(system32, f))
-                        if has_wow64:
-                            _safe_copy(fp, os.path.join(syswow64, f))
 
             # 2. Register Calais SmartCards in Registry
             for root_path in SMARTCARD_REG_ROOTS:
                 for token_key, cfg in CARD_DEFINITIONS.items():
+                    if token_key == "innait" and "WOW6432Node" in root_path:
+                        continue  # Avoid 64-bit InnaIT crashing 32-bit WOW64 processes
                     card_name = cfg["name"]
                     key_path = f"{root_path}\\{card_name}"
                     try:
@@ -427,6 +491,8 @@ class SmartCardRegistrar:
             for root_path in CSP_REG_ROOTS:
                 is_wow = "WOW6432Node" in root_path
                 for token_key, cfg in CARD_DEFINITIONS.items():
+                    if token_key == "innait" and is_wow:
+                        continue  # Avoid 64-bit InnaIT crashing 32-bit WOW64 processes
                     if "csp_name" in cfg:
                         csp_name = cfg["csp_name"]
                         key_path = f"{root_path}\\{csp_name}"

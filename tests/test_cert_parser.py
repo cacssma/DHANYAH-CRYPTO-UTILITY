@@ -28,6 +28,20 @@ class TestCertParser(unittest.TestCase):
         self.assertIn("RSA 2048", cert.key_algo)
         self.assertTrue(len(cert.fingerprint_sha256) > 0)
 
+    def test_pem_export_and_dict(self):
+        cert = CertManager.generate_simulated_dsc(
+            cn="TEST USER",
+            pan="ABCDE1234F",
+        )
+        pem = cert.cert_pem
+        self.assertTrue(pem.startswith("-----BEGIN CERTIFICATE-----"))
+        self.assertTrue(pem.strip().endswith("-----END CERTIFICATE-----"))
+
+        d = cert.to_dict()
+        self.assertEqual(d["common_name"], "TEST USER")
+        self.assertIn("cert_pem", d)
+        self.assertEqual(d["cert_pem"], pem)
+
     def test_expiring_soon_threshold_30_days(self):
         # 15 days validity remaining
         cert_soon = CertManager.generate_simulated_dsc(

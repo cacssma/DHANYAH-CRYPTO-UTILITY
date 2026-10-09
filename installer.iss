@@ -28,6 +28,7 @@ OutputBaseFilename=DhanyahCryptoUtility_Setup_v1.0.1
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=app_icon.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Administrator privileges required for Windows Smart Card MiniDriver & CSP integration
 PrivilegesRequired=admin

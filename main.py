@@ -22,11 +22,21 @@ if sys.stdout is not None:
     log_handlers.append(logging.StreamHandler(sys.stdout))
 
 try:
-    log_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
-    log_file = os.path.join(log_dir, "dhanyah_crypto.log")
+    if getattr(sys, "frozen", False):
+        appdata_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "DhanyahCryptoUtility")
+        os.makedirs(appdata_dir, exist_ok=True)
+        log_file = os.path.join(appdata_dir, "dhanyah_crypto.log")
+    else:
+        log_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file = os.path.join(log_dir, "dhanyah_crypto.log")
     log_handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
 except Exception:
-    pass
+    try:
+        import tempfile
+        log_file = os.path.join(tempfile.gettempdir(), "dhanyah_crypto.log")
+        log_handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    except Exception:
+        pass
 
 if not log_handlers:
     log_handlers.append(logging.NullHandler())
@@ -82,7 +92,6 @@ def run_gui(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
     """Run the modern PySide6 desktop GUI."""
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
-    from ui.main_window import MainWindow
 
     # Set High-DPI attributes before creating QApplication
     QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -92,15 +101,22 @@ def run_gui(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
     app = QApplication(sys.argv)
     app.setApplicationName("Dhanyah Crypto Utility")
     app.setOrganizationName("Dhanyah")
+    app.setQuitOnLastWindowClosed(False)
+
+    from ui.main_window import MainWindow, create_app_icon
+    app.setWindowIcon(create_app_icon())
 
     from core.smartcard_registrar import SmartCardRegistrar
 
-    # Auto-register Windows Smart Card subsystem for all 4 tokens if elevated
+    # Auto-register Windows Smart Card subsystem for all 4 tokens in background if elevated
     if SmartCardRegistrar.is_admin():
-        try:
-            SmartCardRegistrar.register_windows_subsystem()
-        except Exception as e:
-            logger.warning(f"Auto-registration of Smart Card subsystem: {e}")
+        import threading
+        def _reg_bg():
+            try:
+                SmartCardRegistrar.register_windows_subsystem()
+            except Exception as e:
+                logger.warning(f"Auto-registration of Smart Card subsystem: {e}")
+        threading.Thread(target=_reg_bg, daemon=True, name="RegistrarBgThread").start()
 
     # Auto-pulse Windows certificate propagation when hardware token is inserted
     def _on_token_inserted_pulse(token):

@@ -59,6 +59,11 @@ class TestSmartCardRegistrar(unittest.TestCase):
         import subprocess
         subprocess.run(["certutil", "-user", "-delstore", "My", sim_cert.fingerprint_sha1], capture_output=True)
 
+    def test_is_admin_and_elevation_interface(self):
+        is_adm = SmartCardRegistrar.is_admin()
+        self.assertIsInstance(is_adm, bool)
+        self.assertTrue(callable(SmartCardRegistrar.elevate_process))
+
 
 if __name__ == "__main__":
     unittest.main()

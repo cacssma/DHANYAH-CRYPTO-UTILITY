@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID, ExtensionOID
 
 from core.constants import CCA_OIDS, INDIAN_CAS
@@ -100,6 +100,11 @@ class ParsedCertificate:
 
         # Key Usage
         self.key_usage_desc = self._get_key_usage_description()
+
+    @property
+    def cert_pem(self) -> str:
+        """Returns PEM formatted certificate string."""
+        return self.x509_obj.public_bytes(serialization.Encoding.PEM).decode("ascii")
 
     def _get_attr_str(self, rdn, oid) -> Optional[str]:
         try:
@@ -201,6 +206,7 @@ class ParsedCertificate:
             "fingerprint_sha256": self.fingerprint_sha256,
             "fingerprint_sha1": self.fingerprint_sha1,
             "key_usage": self.key_usage_desc,
+            "cert_pem": self.cert_pem,
         }
 
 
@@ -211,10 +217,11 @@ class CertManager:
         self.pkcs11_mgr = pkcs11_mgr
         self._cached_certs: List[ParsedCertificate] = []
 
-    def get_token_certificates(self, token_id: str, slot: int = 0) -> List[ParsedCertificate]:
+    def get_token_certificates(self, token_id: str, slot: Optional[int] = None) -> List[ParsedCertificate]:
         """
         Extract CKO_CERTIFICATE objects from PKCS#11 token session.
         Read-only; does NOT require or expose private keys.
+        Auto-resolves slot with hardware token present.
         """
         if not self.pkcs11_mgr:
             return []
@@ -225,46 +232,81 @@ class CertManager:
         certs: List[ParsedCertificate] = []
         try:
             lib = self.pkcs11_mgr.get_pkcs11_lib(token_id)
-            session = lib.openSession(slot, PyKCS11.CKF_SERIAL_SESSION)
-            try:
-                # Query all certificate objects
-                objects = session.findObjects([(CKA_CLASS, CKO_CERTIFICATE)])
-                for obj in objects:
+
+            # Auto-resolve active slot(s)
+            slots_to_check = []
+            if slot is not None:
+                slots_to_check = [slot]
+            else:
+                if hasattr(self.pkcs11_mgr, "get_slots_with_token"):
+                    active_slots = self.pkcs11_mgr.get_slots_with_token(token_id)
+                    if active_slots:
+                        slots_to_check = list(active_slots)
+
+                if not slots_to_check:
                     try:
-                        attrs = session.getAttributeValue(obj, [CKA_VALUE, CKA_LABEL, CKA_ID])
-                        raw_val, raw_label, raw_id = attrs[0], attrs[1], attrs[2]
-
-                        # CKA_VALUE -> bytes
-                        if isinstance(raw_val, (tuple, list)):
-                            val = bytes(raw_val)
-                        elif isinstance(raw_val, str):
-                            val = raw_val.encode("latin-1")
+                        present_slots = lib.getSlotList(tokenPresent=True)
+                        if present_slots:
+                            slots_to_check = list(present_slots)
                         else:
-                            val = bytes(raw_val) if raw_val else b""
+                            all_slots = lib.getSlotList(tokenPresent=False)
+                            slots_to_check = list(all_slots) if all_slots else [0]
+                    except Exception:
+                        slots_to_check = [0]
 
-                        # CKA_LABEL -> str
-                        if isinstance(raw_label, str):
-                            label = raw_label.strip()
-                        elif isinstance(raw_label, (tuple, list)):
-                            label = "".join(chr(c) for c in raw_label if 32 <= c <= 126).strip()
-                        else:
-                            label = str(raw_label).strip() if raw_label else "DSC Certificate"
+            for s in slots_to_check:
+                try:
+                    session = lib.openSession(s, PyKCS11.CKF_SERIAL_SESSION)
+                except Exception as ex:
+                    logger.debug(f"Could not open session on slot {s} of {token_id}: {ex}")
+                    continue
 
-                        # CKA_ID -> bytes
-                        if isinstance(raw_id, (tuple, list)):
-                            ck_id = bytes(raw_id)
-                        elif isinstance(raw_id, str):
-                            ck_id = raw_id.encode("latin-1")
-                        else:
-                            ck_id = bytes(raw_id) if raw_id else b""
+                try:
+                    # Query all certificate objects
+                    objects = session.findObjects([(CKA_CLASS, CKO_CERTIFICATE)])
+                    for obj in objects:
+                        try:
+                            attrs = session.getAttributeValue(obj, [CKA_VALUE, CKA_LABEL, CKA_ID])
+                            raw_val, raw_label, raw_id = attrs[0], attrs[1], attrs[2]
 
-                        if val:
-                            parsed = ParsedCertificate(cert_der=val, label=label or "DSC Certificate", token_id=token_id, ck_id=ck_id)
-                            certs.append(parsed)
-                    except Exception as e:
-                        logger.warning(f"Error parsing cert object: {e}")
-            finally:
-                session.closeSession()
+                            # CKA_VALUE -> bytes
+                            if isinstance(raw_val, (tuple, list)):
+                                val = bytes(raw_val)
+                            elif isinstance(raw_val, str):
+                                val = raw_val.encode("latin-1")
+                            else:
+                                val = bytes(raw_val) if raw_val else b""
+
+                            # CKA_LABEL -> str
+                            if isinstance(raw_label, str):
+                                label = raw_label.strip()
+                            elif isinstance(raw_label, (tuple, list)):
+                                label = "".join(chr(c) for c in raw_label if 32 <= c <= 126).strip()
+                            else:
+                                label = str(raw_label).strip() if raw_label else "DSC Certificate"
+
+                            # CKA_ID -> bytes
+                            if isinstance(raw_id, (tuple, list)):
+                                ck_id = bytes(raw_id)
+                            elif isinstance(raw_id, str):
+                                ck_id = raw_id.encode("latin-1")
+                            else:
+                                ck_id = bytes(raw_id) if raw_id else b""
+
+                            if val:
+                                parsed = ParsedCertificate(
+                                    cert_der=val,
+                                    label=label or "DSC Certificate",
+                                    token_id=token_id,
+                                    ck_id=ck_id,
+                                )
+                                # Avoid duplicates by fingerprint
+                                if not any(c.fingerprint_sha256 == parsed.fingerprint_sha256 for c in certs):
+                                    certs.append(parsed)
+                        except Exception as e:
+                            logger.warning(f"Error parsing cert object: {e}")
+                finally:
+                    session.closeSession()
         except Exception as e:
             logger.error(f"Failed to extract certificates from {token_id}: {e}")
 

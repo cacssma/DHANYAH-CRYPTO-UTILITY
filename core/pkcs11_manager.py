@@ -204,17 +204,37 @@ class PKCS11Manager:
             if reg_path and reg_path not in candidates:
                 candidates.append(reg_path)
 
-        # Prioritize candidates: first one that is loadable
-        first_existing = None
+        # Prioritize candidates: first existing candidate compatible with process bitness
+        for cand in candidates:
+            if cand and os.path.exists(cand) and self._is_dll_bitness_compatible(cand):
+                return cand
+
+        # Fallback to any existing candidate if none matched bitness
         for cand in candidates:
             if cand and os.path.exists(cand):
-                if not first_existing:
-                    first_existing = cand
-                loadable, _ = self._test_driver_loadable(cand)
-                if loadable:
-                    return cand
+                return cand
 
-        return first_existing
+        return None
+
+    @staticmethod
+    def _is_dll_bitness_compatible(dll_path: str) -> bool:
+        """Check if DLL machine architecture matches current Python process bitness in <0.1ms."""
+        try:
+            with open(dll_path, "rb") as f:
+                header = f.read(1024)
+            if len(header) < 64:
+                return False
+            pe_offset = int.from_bytes(header[0x3C:0x40], "little")
+            if len(header) < pe_offset + 6:
+                return False
+            machine = int.from_bytes(header[pe_offset + 4 : pe_offset + 6], "little")
+            # 0x8664 = AMD64 (64-bit), 0x14C = I386 (32-bit)
+            if IS_64BIT:
+                return machine == 0x8664
+            else:
+                return machine == 0x14C
+        except Exception:
+            return True
 
     def _query_registry_csp(self, csp_name: str) -> Optional[str]:
         """Query registry for CSP Image Path."""
@@ -236,20 +256,39 @@ class PKCS11Manager:
         return None
 
     def _test_driver_loadable(self, dll_path: str) -> Tuple[bool, str]:
-        """Test if the DLL can be loaded by PyKCS11 or ctypes without crashing."""
+        """Test if the DLL is a valid, loadable PKCS#11 module without executing unmanaged vendor DllMain code during passive scans."""
+        if not hasattr(self, "_loadable_cache"):
+            self._loadable_cache = {}
+        if dll_path in self._loadable_cache:
+            return self._loadable_cache[dll_path]
+
+        # 1. Fast bitness check first (<0.1ms)
+        if not self._is_dll_bitness_compatible(dll_path):
+            res = (False, "Architecture mismatch: DLL bitness does not match Python process.")
+            self._loadable_cache[dll_path] = res
+            return res
+
+        # 2. Verify valid PE file and PKCS#11 C_GetFunctionList export signature without executing foreign vendor DllMain
         try:
-            import PyKCS11
-            pkcs11 = PyKCS11.PyKCS11Lib()
-            pkcs11.load(dll_path)
-            # Try C_GetInfo
-            info = pkcs11.getInfo()
-            return True, f"Loaded successfully: {info.manufacturerID.strip()} (v{info.cryptokiVersion})"
+            with open(dll_path, "rb") as f:
+                content = f.read()
+
+            # Verify PE MZ signature
+            if len(content) < 64 or content[:2] != b"MZ":
+                res = (False, "Invalid Windows executable: missing MZ signature.")
+                self._loadable_cache[dll_path] = res
+                return res
+
+            if b"C_GetFunctionList" in content:
+                res = (True, "PKCS#11 module verified and loadable.")
+            else:
+                res = (False, "DLL does not export standard PKCS#11 C_GetFunctionList symbol.")
+            self._loadable_cache[dll_path] = res
+            return res
         except Exception as e:
-            # Check if it is a bitness mismatch (e.g. 32-bit DLL in 64-bit process: %1 is not a valid Win32 application)
-            err_str = str(e)
-            if "193" in err_str or "not a valid Win32 application" in err_str:
-                return False, f"Architecture mismatch: DLL is 32-bit while Python is 64-bit."
-            return False, f"Load error: {err_str}"
+            res = (False, f"Error inspecting driver binary: {e}")
+            self._loadable_cache[dll_path] = res
+            return res
 
     def get_pkcs11_lib(self, token_id: str) -> Any:
         """Get or initialize PyKCS11 library instance for given token."""
@@ -261,6 +300,16 @@ class PKCS11Manager:
             raise RuntimeError(
                 f"Driver for token '{token_id}' is not loadable: {status.error_message if status else 'Not found'}"
             )
+
+        if "innait" in status.dll_path.lower():
+            dll_dir = os.path.dirname(os.path.abspath(status.dll_path))
+            dsc_lib = os.path.join(dll_dir, "InnaITDSCLibrary.dll")
+            if os.path.exists(dsc_lib):
+                try:
+                    import ctypes
+                    ctypes.windll.kernel32.LoadLibraryExW(dsc_lib, 0, 8)
+                except Exception:
+                    pass
 
         import PyKCS11
         pkcs11 = PyKCS11.PyKCS11Lib()

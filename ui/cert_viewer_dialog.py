@@ -137,9 +137,22 @@ class CertViewerDialog(QDialog):
 
         # Action Buttons
         btn_row = QHBoxLayout()
-        btn_export = QPushButton("Export Certificate (.cer)")
-        btn_export.clicked.connect(self._export_cert)
-        btn_row.addWidget(btn_export)
+        btn_row.setSpacing(10)
+
+        btn_export_der = QPushButton("Export DER (.cer)")
+        btn_export_der.setToolTip("Export certificate as binary DER (.cer) format")
+        btn_export_der.clicked.connect(self._export_der)
+        btn_row.addWidget(btn_export_der)
+
+        btn_export_pem = QPushButton("Export PEM (.pem)")
+        btn_export_pem.setToolTip("Export certificate as ASCII Base64 PEM (.pem) format")
+        btn_export_pem.clicked.connect(self._export_pem)
+        btn_row.addWidget(btn_export_pem)
+
+        btn_win_view = QPushButton("🪟 Windows Certificate Viewer")
+        btn_win_view.setToolTip("Launch native Windows Certificate Properties inspector with full CA trust chain")
+        btn_win_view.clicked.connect(self._open_in_windows_viewer)
+        btn_row.addWidget(btn_win_view)
 
         btn_row.addStretch()
 
@@ -164,10 +177,11 @@ class CertViewerDialog(QDialog):
             val.setTextInteractionFlags(Qt.TextSelectableByMouse)
         grid.addWidget(val, row, 1)
 
-    def _export_cert(self):
+    def _export_der(self):
+        """Export certificate as binary DER (.cer)."""
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Certificate",
+            "Export Certificate (DER)",
             f"{self.cert.common_name.replace(' ', '_')}.cer",
             "DER Certificate (*.cer);;All Files (*)",
         )
@@ -175,6 +189,43 @@ class CertViewerDialog(QDialog):
             try:
                 with open(file_path, "wb") as f:
                     f.write(self.cert.cert_der)
-                QMessageBox.information(self, "Export Successful", f"Certificate saved to:\n{file_path}")
+                QMessageBox.information(self, "Export Successful", f"DER Certificate saved to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to save certificate: {e}")
+
+    def _export_pem(self):
+        """Export certificate as Base64 PEM (.pem)."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Certificate (PEM)",
+            f"{self.cert.common_name.replace(' ', '_')}.pem",
+            "PEM Certificate (*.pem *.crt);;All Files (*)",
+        )
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(self.cert.cert_pem)
+                QMessageBox.information(self, "Export Successful", f"PEM Certificate saved to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to save certificate: {e}")
+
+    def _open_in_windows_viewer(self):
+        """Open the certificate in the native Windows Crypto Shell Viewer."""
+        try:
+            import tempfile
+            import subprocess
+            temp_dir = tempfile.gettempdir()
+            clean_cn = "".join(c for c in self.cert.common_name if c.isalnum() or c in (" ", "_", "-")).strip()
+            temp_path = os.path.join(temp_dir, f"DSC_{clean_cn}_{self.cert.serial_number_hex[:8]}.cer")
+            with open(temp_path, "wb") as f:
+                f.write(self.cert.cert_der)
+
+            if os.name == "nt":
+                try:
+                    os.startfile(temp_path)
+                except Exception:
+                    subprocess.Popen(["rundll32.exe", "cryptext.dll,CryptExtOpenCER", temp_path])
+            else:
+                QMessageBox.information(self, "Certificate Saved", f"Certificate written to:\n{temp_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Certificate Viewer", f"Failed to launch Windows Certificate Viewer: {e}")

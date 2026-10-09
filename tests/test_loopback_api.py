@@ -51,6 +51,8 @@ class TestLoopbackServer(unittest.TestCase):
             self.assertEqual(data["port"], 18201)
             self.assertIn("drivers", data)
             self.assertTrue(len(data["drivers"]) >= 4)
+            self.assertIn("port_protocols", data)
+            self.assertIn("https_enabled", data)
 
     def test_cors_preflight(self):
         url = "http://127.0.0.1:18201/status"
@@ -58,6 +60,13 @@ class TestLoopbackServer(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=3) as resp:
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_ssl_cert_generation(self):
+        from server.loopback_server import ensure_localhost_ssl_cert
+        import os
+        crt, key = ensure_localhost_ssl_cert()
+        self.assertTrue(os.path.exists(crt))
+        self.assertTrue(os.path.exists(key))
 
     def test_sign_hash_flow_with_simulation(self):
         # Enable simulation token

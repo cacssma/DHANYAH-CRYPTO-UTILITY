@@ -102,6 +102,35 @@ class TestPortalGateway(unittest.TestCase):
         # Clear simulation
         self.detector.set_simulation_mode(None)
 
+    def test_default_ports_configured(self):
+        overview = self.server.get_port_overview()
+        ports = [p["port"] for p in overview]
+        self.assertIn(15085, ports, "Port 15085 must be configured by default for GST / MCA / TRACES")
+        self.assertIn(18200, ports, "Port 18200 must be configured by default")
+        self.assertIn(26769, ports, "Port 26769 must be configured by default")
+
+    def test_custom_port_management(self):
+        custom_port = 18298
+        # Add custom port
+        ok, msg = self.server.add_custom_port(custom_port, protocol="http", name="Custom Test Portal", portal="Test Portal")
+        self.assertTrue(ok, f"Failed to add custom port: {msg}")
+
+        # Verify in overview
+        overview = self.server.get_port_overview()
+        item = next((p for p in overview if p["port"] == custom_port), None)
+        self.assertIsNotNone(item)
+        self.assertTrue(item["is_active"])
+
+        # Test connectivity
+        ok_conn, msg_conn = self.server.test_port(custom_port)
+        self.assertTrue(ok_conn, f"Custom port connectivity test failed: {msg_conn}")
+
+        # Remove custom port
+        ok_rem, _ = self.server.remove_custom_port(custom_port)
+        self.assertTrue(ok_rem)
+        overview_after = self.server.get_port_overview()
+        self.assertIsNone(next((p for p in overview_after if p["port"] == custom_port), None))
+
 
 if __name__ == "__main__":
     unittest.main()
