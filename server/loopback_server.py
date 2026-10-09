@@ -105,7 +105,7 @@ def check_embridge_service_running() -> bool:
 
 
 def stop_embridge_service() -> Tuple[bool, str]:
-    """Stops the official eMudhra emBridge Windows service to free port 26769 for Dhanyah."""
+    """Stops the official eMudhra emBridge Windows service if requested by user."""
     import subprocess
     try:
         res = subprocess.run(
@@ -115,7 +115,7 @@ def stop_embridge_service() -> Tuple[bool, str]:
             timeout=5,
         )
         if res.returncode == 0:
-            logger.info("Official emBridge Windows service stopped to release port 26769.")
+            logger.info("Official emBridge Windows service stopped.")
             return True, "Official emBridge service stopped successfully."
         res2 = subprocess.run(
             ["sc", "stop", "emBridge"],
@@ -128,6 +128,33 @@ def stop_embridge_service() -> Tuple[bool, str]:
         return False, res2.stderr or res2.stdout or res.stdout
     except Exception as e:
         logger.warning(f"Could not stop emBridge service: {e}")
+        return False, str(e)
+
+
+def start_embridge_service() -> Tuple[bool, str]:
+    """Starts the official eMudhra emBridge Windows service if it was stopped."""
+    import subprocess
+    try:
+        res = subprocess.run(
+            ["net", "start", "emBridge"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0:
+            logger.info("Official emBridge Windows service started.")
+            return True, "Official emBridge service started successfully."
+        res2 = subprocess.run(
+            ["sc", "start", "emBridge"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res2.returncode == 0:
+            return True, "Official emBridge service started."
+        return False, res2.stderr or res2.stdout or res.stdout
+    except Exception as e:
+        logger.warning(f"Could not start emBridge service: {e}")
         return False, str(e)
 
 
@@ -194,16 +221,16 @@ DEFAULT_GOVT_PORTS = [
         "port": 26769,
         "protocol": "https",
         "name": "Income Tax / MCA V3 Primary (emBridge)",
-        "portal": "Income Tax e-Filing & MCA V3",
-        "enabled": True,
+        "portal": "Income Tax & MCA V3 (Delegated to official emBridge)",
+        "enabled": False,  # Disabled by default so Dhanyah never clashes with official emBridge
         "builtin": True,
     },
     {
         "port": 26770,
         "protocol": "https",
         "name": "Income Tax / MCA V3 Alternative (emBridge)",
-        "portal": "Income Tax & MCA V3 Secondary",
-        "enabled": True,
+        "portal": "Income Tax & MCA V3 Secondary (Delegated to official emBridge)",
+        "enabled": False,  # Disabled by default so Dhanyah never clashes with official emBridge
         "builtin": True,
     },
     {
@@ -259,6 +286,14 @@ def load_gateway_ports_config() -> List[Dict[str, Any]]:
     for default in DEFAULT_GOVT_PORTS:
         if default["port"] not in existing_ports:
             merged.append(dict(default))
+
+    # If official emBridge service is present/running, keep 26769 & 26770 disabled
+    # to guarantee zero port clash and prevent emBridge services from failing
+    if check_embridge_service_running():
+        for c in merged:
+            if c.get("port") in (26769, 26770):
+                c["enabled"] = False
+
     return merged
 
 
@@ -921,6 +956,14 @@ class LoopbackServer:
         if port in self._servers:
             return True
 
+        # Prevent clashing with official emBridge service if it is running
+        if port in (26769, 26770) and check_embridge_service_running():
+            logger.info(
+                f"Official emBridge Windows service is active on port {port}. "
+                f"Dhanyah will not bind to port {port} to prevent clashing."
+            )
+            return False
+
         crt_path, key_path = ensure_localhost_ssl_cert()
         ssl_ready = os.path.exists(crt_path) and os.path.exists(key_path)
         is_https = (str(protocol).lower() == "https") and ssl_ready
@@ -982,11 +1025,9 @@ class LoopbackServer:
                 },
             )
 
-        # Check and handle competing official emBridge service to free port 26769 if enabled
-        is_26769_enabled = any(c.get("port") == 26769 and c.get("enabled", True) for c in self.port_configs)
-        if is_26769_enabled and check_embridge_service_running():
-            logger.info("Found competing emBridge background service. Stopping it to claim port 26769...")
-            stop_embridge_service()
+        # Log official emBridge coexistence
+        if check_embridge_service_running():
+            logger.info("Official emBridge service is active. Dhanyah will coexist peacefully without touching or stopping emBridge.")
 
         bound_any = False
         for cfg in self.port_configs:
@@ -1110,6 +1151,9 @@ class LoopbackServer:
 
     def free_and_claim_port(self, port: int) -> Tuple[bool, str]:
         """Kills any conflicting process and starts listening on the port."""
+        if port in (26769, 26770) and check_embridge_service_running():
+            return False, f"Port {port} is dedicated to official emBridge. Dhanyah coexists with emBridge without terminating it."
+
         self.stop_port(port)
         ok_kill, msg_kill = kill_process_on_port(port)
         import time
@@ -1123,13 +1167,15 @@ class LoopbackServer:
 
     def get_port_overview(self, check_conflicts: bool = False) -> List[Dict[str, Any]]:
         """Returns the current runtime status of all configured ports."""
+        embridge_running = check_embridge_service_running()
         overview = []
         for c in self.port_configs:
             port = int(c["port"])
             protocol = c.get("protocol", "http")
             is_active = port in self._servers
+            is_embridge_port = (port in (26769, 26770)) and embridge_running
             conflict = None
-            if not is_active and c.get("enabled", True) and check_conflicts:
+            if not is_active and not is_embridge_port and c.get("enabled", True) and check_conflicts:
                 conflict_info = find_process_on_port(port)
                 if conflict_info:
                     conflict = {"pid": conflict_info[0], "process": conflict_info[1]}
@@ -1143,6 +1189,7 @@ class LoopbackServer:
                     "enabled": c.get("enabled", True),
                     "builtin": c.get("builtin", False),
                     "is_active": is_active,
+                    "embridge_active": is_embridge_port,
                     "conflict": conflict,
                 }
             )

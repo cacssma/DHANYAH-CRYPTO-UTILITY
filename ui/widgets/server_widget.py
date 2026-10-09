@@ -35,6 +35,7 @@ from server.loopback_server import (
     LoopbackServer,
     check_embridge_service_running,
     stop_embridge_service,
+    start_embridge_service,
 )
 
 
@@ -199,10 +200,10 @@ class ServerWidget(QWidget):
         btn_trust_ssl.clicked.connect(self._trust_ssl)
         action_row.addWidget(btn_trust_ssl)
 
-        btn_claim_embridge = QPushButton("⚡ Claim emBridge Port 26769")
-        btn_claim_embridge.setToolTip("Stops conflicting background emBridge service so Dhanyah claims port 26769 for Income Tax & MCA")
-        btn_claim_embridge.clicked.connect(self._claim_embridge)
-        action_row.addWidget(btn_claim_embridge)
+        btn_verify_embridge = QPushButton("🛡️ Verify Official emBridge Status")
+        btn_verify_embridge.setToolTip("Checks if the official eMudhra emBridge service is running healthy alongside Dhanyah")
+        btn_verify_embridge.clicked.connect(self._verify_embridge)
+        action_row.addWidget(btn_verify_embridge)
 
         btn_free_conflicts = QPushButton("⚡ Free All Conflicted Ports")
         btn_free_conflicts.setToolTip("Terminates external blocking processes and claims all government portal ports for Dhanyah")
@@ -320,10 +321,18 @@ class ServerWidget(QWidget):
             l_status.setContentsMargins(4, 2, 4, 2)
             lbl_status = QLabel()
 
+            is_embridge_active = item.get("embridge_active", False)
+
             if is_active:
-                lbl_status.setText("● ACTIVE (Listening)")
+                lbl_status.setText("● ACTIVE (Dhanyah)")
                 lbl_status.setStyleSheet(
                     "background-color: #064e3b; color: #34d399; border: 1px solid #059669; "
+                    "border-radius: 4px; padding: 2px 8px; font-weight: 600; font-size: 11px;"
+                )
+            elif is_embridge_active:
+                lbl_status.setText("● OFFICIAL emBridge (Coexisting)")
+                lbl_status.setStyleSheet(
+                    "background-color: #0c4a6e; color: #38bdf8; border: 1px solid #0284c7; "
                     "border-radius: 4px; padding: 2px 8px; font-weight: 600; font-size: 11px;"
                 )
             elif conflict:
@@ -362,28 +371,35 @@ class ServerWidget(QWidget):
             btn_test.clicked.connect(lambda _, p=port: self._test_single_port(p))
             l_acts.addWidget(btn_test)
 
-            # Claim / Free Button if conflict exists
-            if conflict:
-                btn_claim = QPushButton("⚡ Claim")
-                btn_claim.setFixedWidth(64)
-                btn_claim.setProperty("class", "DangerButton")
-                btn_claim.setToolTip(f"Kill conflicting {conflict.get('process')} to free port {port}")
-                btn_claim.clicked.connect(lambda _, p=port: self._claim_single_port(p))
-                l_acts.addWidget(btn_claim)
+            if is_embridge_active:
+                btn_coexist = QPushButton("✓ Coexisting")
+                btn_coexist.setEnabled(False)
+                btn_coexist.setStyleSheet("color: #38bdf8; font-size: 11px; padding: 2px 6px;")
+                btn_coexist.setToolTip("Official emBridge is handling this port smoothly without clash.")
+                l_acts.addWidget(btn_coexist)
+            else:
+                # Claim / Free Button if conflict exists
+                if conflict:
+                    btn_claim = QPushButton("⚡ Claim")
+                    btn_claim.setFixedWidth(64)
+                    btn_claim.setProperty("class", "DangerButton")
+                    btn_claim.setToolTip(f"Kill conflicting {conflict.get('process')} to free port {port}")
+                    btn_claim.clicked.connect(lambda _, p=port: self._claim_single_port(p))
+                    l_acts.addWidget(btn_claim)
 
-            # Toggle Enable/Disable
-            btn_tog = QPushButton("Disable" if enabled else "Enable")
-            btn_tog.setFixedWidth(60)
-            btn_tog.clicked.connect(lambda _, p=port, en=enabled: self._toggle_single_port(p, not en))
-            l_acts.addWidget(btn_tog)
+                # Toggle Enable/Disable
+                btn_tog = QPushButton("Disable" if enabled else "Enable")
+                btn_tog.setFixedWidth(60)
+                btn_tog.clicked.connect(lambda _, p=port, en=enabled: self._toggle_single_port(p, not en))
+                l_acts.addWidget(btn_tog)
 
-            # Delete button if custom port
-            if not builtin:
-                btn_del = QPushButton("🗑")
-                btn_del.setFixedWidth(30)
-                btn_del.setToolTip("Remove custom port")
-                btn_del.clicked.connect(lambda _, p=port: self._remove_single_port(p))
-                l_acts.addWidget(btn_del)
+                # Delete button if custom port
+                if not builtin:
+                    btn_del = QPushButton("🗑")
+                    btn_del.setFixedWidth(30)
+                    btn_del.setToolTip("Remove custom port")
+                    btn_del.clicked.connect(lambda _, p=port: self._remove_single_port(p))
+                    l_acts.addWidget(btn_del)
 
             l_acts.addStretch()
             self.table_ports.setCellWidget(row, 4, w_acts)
@@ -524,31 +540,34 @@ class ServerWidget(QWidget):
         url = QUrl(f"http://{self.server.host}:{self.server.port}/status")
         QDesktopServices.openUrl(url)
 
-    def _claim_embridge(self):
+    def _verify_embridge(self):
         running = check_embridge_service_running()
-        if not running:
-            self._log_local("No competing emBridge Windows service is running. Port 26769 is clear.")
-            QMessageBox.information(
-                self,
-                "emBridge Port Status",
-                "Official emBridge Windows service is NOT running.\nDhanyah Crypto Utility has control of port 26769.",
-            )
-            return
-
-        ok, msg = stop_embridge_service()
-        if ok:
-            self._log_local("Stopped competing emBridge service. Re-binding port 26769...")
-            self.server.free_and_claim_port(26769)
+        if running:
+            self._log_local("Verified: Official emBridge Windows service is ACTIVE and running on ports 26769/26770.")
             self._refresh_ports_table()
             QMessageBox.information(
                 self,
-                "emBridge Port Claimed",
-                "Successfully stopped conflicting emBridge service!\nDhanyah Crypto Utility is now actively serving Income Tax and MCA on port 26769.",
+                "emBridge Status: Healthy",
+                "Official eMudhra emBridge Windows service is RUNNING healthy!\n\n"
+                "• Ports 26769 and 26770: Dedicated to official emBridge.\n"
+                "• Ports 15085, 1585, 26443, 16443, 8080: Handled by Dhanyah.\n"
+                "• Status: Coexisting peacefully with ZERO port clashes.",
             )
         else:
-            self._log_local(f"Could not stop emBridge service: {msg}")
-            QMessageBox.warning(
+            self._log_local("Notice: Official emBridge Windows service is currently stopped.")
+            ret = QMessageBox.question(
                 self,
-                "Service Action Required",
-                f"Could not stop emBridge service automatically:\n{msg}\n\nPlease run this utility as Administrator or run 'Stop-Service emBridge' in PowerShell.",
+                "emBridge Service Stopped",
+                "The official eMudhra emBridge Windows service is currently STOPPED.\n\n"
+                "Would you like Dhanyah to start the official emBridge service now?",
+                QMessageBox.Yes | QMessageBox.No,
             )
+            if ret == QMessageBox.Yes:
+                ok, msg = start_embridge_service()
+                if ok:
+                    self._log_local("Started official emBridge service successfully.")
+                    self._refresh_ports_table()
+                    QMessageBox.information(self, "emBridge Started", "Official emBridge service started successfully!")
+                else:
+                    self._log_local(f"Could not start emBridge: {msg}")
+                    QMessageBox.warning(self, "Start Error", f"Could not start emBridge service:\n{msg}")

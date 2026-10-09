@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
         self.lbl_hdr_driver.setProperty("class", "BadgeValid")
         h_layout.addWidget(self.lbl_hdr_driver)
 
-        self.lbl_hdr_server = QLabel("Govt Gateway :15085, :26769, :18200")
+        self.lbl_hdr_server = QLabel("Govt Gateway :15085, :18200 (emBridge Coexisting)")
         self.lbl_hdr_server.setProperty("class", "BadgeInfo")
         h_layout.addWidget(self.lbl_hdr_server)
 
@@ -426,7 +426,7 @@ class MainWindow(QMainWindow):
 
         tray_menu.addSeparator()
 
-        act_restart_gw = tray_menu.addAction("🔄  Restart Gateway (15085, 26769, 18200)")
+        act_restart_gw = tray_menu.addAction("🔄  Restart Gateway (15085, 18200)")
         act_restart_gw.triggered.connect(self._restart_gateway)
 
         tray_menu.addSeparator()
