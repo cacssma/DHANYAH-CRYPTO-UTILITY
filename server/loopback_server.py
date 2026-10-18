@@ -397,7 +397,7 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         # Dhanyah Native Endpoints & Portal Health Checks
         elif path in ["/", "/status", "/health", "/checkServer", "/isServiceRunning", "/ping"]:
             self._handle_status()
-        elif path in ["/certificates", "/certs"]:
+        elif path in ["/certificates", "/certs", "/api/certificates", "/api/certs"]:
             self._handle_certificates()
         elif path == "/drivers":
             self._handle_drivers()
@@ -436,16 +436,16 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         elif path == "/DSC/Initialize":
             self._send_json(200, {"status": 1, "message": "Success"})
         # emSigner Endpoints
-        elif path in ["/getCertificate", "/getCertificates"]:
+        elif path in ["/getCertificate", "/getCertificates", "/api/getCertificate"]:
             self._handle_emsigner_certificates()
-        elif path in ["/sign", "/signData", "/getSign"]:
+        elif path in ["/sign", "/signData", "/getSign", "/pkcs1sign", "/api/pkcs1sign"]:
             self._handle_emsigner_sign(payload)
         # Dhanyah Native Endpoints
-        elif path in ["/verify/pin", "/pin/verify"]:
+        elif path in ["/verify/pin", "/pin/verify", "/api/verify/pin"]:
             self._handle_verify_pin(payload)
-        elif path in ["/sign/hash", "/hash/sign"]:
+        elif path in ["/sign/hash", "/hash/sign", "/api/sign/hash", "/api/sign"]:
             self._handle_sign_hash(payload)
-        elif path in ["/sign/pdf", "/pdf/sign"]:
+        elif path in ["/sign/pdf", "/pdf/sign", "/api/sign/pdf"]:
             self._handle_sign_pdf(payload)
         elif path in ["/ports", "/gateway/ports"]:
             self._handle_ports_overview()
@@ -667,12 +667,37 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             })
             return
 
+        # Resolve token and slot from requested certificate or fallback
+        certs = app.get_certificates()
+        target_token_id = payload.get("token_id")
+        target_slot = payload.get("slot", None)
+        ck_id = b""
+
+        target_serial = payload.get("serialNumber") or payload.get("serial_hex") or payload.get("serial")
+        target_alias = payload.get("alias") or payload.get("commonName") or payload.get("signer")
+
+        for c in certs:
+            if target_serial and c.serial_number_hex.lower() == str(target_serial).lower():
+                target_token_id = getattr(c, "token_id", None) or target_token_id
+                target_slot = getattr(c, "slot", target_slot)
+                ck_id = getattr(c, "ck_id", b"")
+                break
+            elif target_alias and str(target_alias).lower() in c.common_name.lower():
+                target_token_id = getattr(c, "token_id", None) or target_token_id
+                target_slot = getattr(c, "slot", target_slot)
+                ck_id = getattr(c, "ck_id", b"")
+                break
+
+        if not target_token_id:
+            target_token_id = token.token_id
+
         try:
             raw_sig = app.signer.sign_hash_hardware(
-                token_id=token.token_id,
-                slot=payload.get("slot", None),
+                token_id=target_token_id,
+                slot=target_slot,
                 pin=pin,
                 data_hash=data_hash,
+                ck_id=ck_id,
                 is_simulated=token.is_simulated,
             )
             self._send_json(
@@ -872,8 +897,24 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             input_bytes = raw_input.encode("utf-8")
 
         certs = app.get_certificates()
-        cert = certs[0] if certs else None
-        ck_id = cert.ck_id if cert else b""
+        target_cert = None
+        target_serial = payload.get("serialNumber") or payload.get("serial_hex") or payload.get("serial")
+        target_alias = payload.get("alias") or payload.get("commonName") or payload.get("signer")
+
+        for c in certs:
+            if target_serial and c.serial_number_hex.lower() == str(target_serial).lower():
+                target_cert = c
+                break
+            elif target_alias and str(target_alias).lower() in c.common_name.lower():
+                target_cert = c
+                break
+
+        if not target_cert and certs:
+            target_cert = certs[0]
+
+        target_token_id = getattr(target_cert, "token_id", None) or payload.get("token_id") or token.token_id
+        target_slot = getattr(target_cert, "slot", 0) or payload.get("slot", 0)
+        ck_id = getattr(target_cert, "ck_id", b"")
 
         # Check if remote token proxy is active
         if getattr(token, "token_id", "") == "REMOTE_LAN":
@@ -907,8 +948,8 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         try:
             if len(input_bytes) in [20, 32, 64]:
                 sig_bytes = app.signer.sign_hash_hardware(
-                    token_id=token.token_id,
-                    slot=payload.get("slot", 0),
+                    token_id=target_token_id,
+                    slot=target_slot,
                     pin=pin,
                     data_hash=input_bytes,
                     ck_id=ck_id,
@@ -917,8 +958,8 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
                 )
             else:
                 sig_bytes = app.signer.sign_data(
-                    token_id=token.token_id,
-                    slot=payload.get("slot", 0),
+                    token_id=target_token_id,
+                    slot=target_slot,
                     pin=pin,
                     raw_data=input_bytes,
                     algo=algo,
@@ -975,8 +1016,24 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             input_bytes = raw_input.encode("utf-8")
 
         certs = app.get_certificates()
-        cert = certs[0] if certs else None
-        ck_id = cert.ck_id if cert else b""
+        target_cert = None
+        target_serial = payload.get("serialNumber") or payload.get("serial_hex") or payload.get("serial")
+        target_alias = payload.get("alias") or payload.get("commonName") or payload.get("signer")
+
+        for c in certs:
+            if target_serial and c.serial_number_hex.lower() == str(target_serial).lower():
+                target_cert = c
+                break
+            elif target_alias and str(target_alias).lower() in c.common_name.lower():
+                target_cert = c
+                break
+
+        if not target_cert and certs:
+            target_cert = certs[0]
+
+        target_token_id = getattr(target_cert, "token_id", None) or payload.get("token_id") or token.token_id
+        target_slot = getattr(target_cert, "slot", 0) or payload.get("slot", 0)
+        ck_id = getattr(target_cert, "ck_id", b"")
 
         # Check if remote token proxy is active
         if getattr(token, "token_id", "") == "REMOTE_LAN":
@@ -1000,8 +1057,8 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         try:
             if len(input_bytes) in [20, 32, 64]:
                 sig_bytes = app.signer.sign_hash_hardware(
-                    token_id=token.token_id,
-                    slot=payload.get("slot", 0),
+                    token_id=target_token_id,
+                    slot=target_slot,
                     pin=pin,
                     data_hash=input_bytes,
                     ck_id=ck_id,
@@ -1010,8 +1067,8 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
                 )
             else:
                 sig_bytes = app.signer.sign_data(
-                    token_id=token.token_id,
-                    slot=payload.get("slot", 0),
+                    token_id=target_token_id,
+                    slot=target_slot,
                     pin=pin,
                     raw_data=input_bytes,
                     algo=algo,
@@ -1104,17 +1161,17 @@ class LoopbackServer:
         return self.pkcs11_mgr.get_all_driver_statuses()
 
     def get_certificates(self):
-        token = self.get_primary_token()
-        if not token:
-            return []
-        if getattr(token, "token_id", "") == "REMOTE_LAN":
-            peer = self.lan_mesh_mgr.mounted_peer if self.lan_mesh_mgr else None
+        connected = self.detector.get_connected_tokens() if self.detector else []
+        if self.lan_mesh_mgr and self.lan_mesh_mgr.mounted_peer:
+            peer = self.lan_mesh_mgr.mounted_peer
             if peer and peer.certificates:
                 return [c.to_parsed_certificate() for c in peer.certificates]
             return []
-        if token.is_simulated or token.token_id == "SIMULATED":
-            return [self.cert_manager.generate_simulated_dsc()]
-        return self.cert_manager.get_token_certificates(token.token_id)
+
+        if not connected:
+            return []
+
+        return self.cert_manager.get_all_certificates(connected)
 
     def trust_ssl_certificate(self) -> Tuple[bool, str]:
         """Install local certificate to Windows Trusted Root store."""

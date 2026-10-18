@@ -147,9 +147,21 @@ class TokenDetector:
         if self._running:
             return
         self._running = True
+        try:
+            self._poll_pcsc()
+        except Exception as e:
+            logger.debug(f"Initial PC/SC Poll notice: {e}")
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="TokenDetectorThread")
         self._thread.start()
         logger.info("Hardware Token Detector started.")
+
+    def scan_tokens(self) -> List[DetectedToken]:
+        """Perform an immediate synchronous PC/SC poll and return connected tokens."""
+        try:
+            self._poll_pcsc()
+        except Exception as e:
+            logger.debug(f"Scan tokens poll notice: {e}")
+        return self.get_connected_tokens()
 
     def stop(self):
         """Stop background polling thread."""
@@ -170,6 +182,20 @@ class TokenDetector:
         """Return primary active token, or None if no token is plugged in."""
         tokens = self.get_connected_tokens()
         return tokens[0] if tokens else None
+
+    def get_token_by_id(self, token_id: str) -> Optional[DetectedToken]:
+        """Return connected token matching given token_id."""
+        for t in self.get_connected_tokens():
+            if t.token_id == token_id:
+                return t
+        return None
+
+    def get_token_by_reader(self, reader_name: str) -> Optional[DetectedToken]:
+        """Return connected token matching reader name."""
+        for t in self.get_connected_tokens():
+            if t.reader_name == reader_name:
+                return t
+        return None
 
     def set_simulation_mode(self, token_id: Optional[str] = None):
         """

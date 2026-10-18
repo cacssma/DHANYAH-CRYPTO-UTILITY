@@ -2,6 +2,7 @@
 Dhanyah Crypto Utility - PIN Management Widget (Verify & Change Token PIN)
 """
 
+from typing import List, Optional, Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QMessageBox,
     QCheckBox,
+    QComboBox,
     QScrollArea,
 )
 
@@ -29,12 +31,36 @@ class PinManagementWidget(QWidget):
         self._current_token_id = ""
         self._current_slot = 0
         self._is_simulated = False
+        self._tokens: List[Any] = []
         self._init_ui()
 
-    def set_token_context(self, token_id: str, slot: int = 0, is_simulated: bool = False):
+    def set_token_context(
+        self,
+        token_id: str,
+        slot: int = 0,
+        is_simulated: bool = False,
+        tokens: Optional[List[Any]] = None,
+    ):
         self._current_token_id = token_id
         self._current_slot = slot
         self._is_simulated = is_simulated
+        self._tokens = list(tokens) if tokens else []
+
+        if len(self._tokens) > 1:
+            self.token_bar.setVisible(True)
+            self.combo_tokens.blockSignals(True)
+            self.combo_tokens.clear()
+            active_idx = 0
+            for idx, t in enumerate(self._tokens):
+                label = f"{t.name}  |  Slot: {t.reader_name}"
+                self.combo_tokens.addItem(label, t)
+                if t.token_id == token_id:
+                    active_idx = idx
+            self.combo_tokens.setCurrentIndex(active_idx)
+            self.combo_tokens.blockSignals(False)
+        else:
+            self.token_bar.setVisible(False)
+
         has_token = bool(token_id)
         self.btn_verify.setEnabled(has_token)
         self.btn_change.setEnabled(has_token)
@@ -46,9 +72,41 @@ class PinManagementWidget(QWidget):
             self.lbl_verify_res.setProperty("class", "BadgeInfo")
         self.lbl_verify_res.setStyleSheet("")
 
+    def _on_token_selected(self, index: int):
+        token = self.combo_tokens.currentData()
+        if token:
+            self._current_token_id = token.token_id
+            self._is_simulated = token.is_simulated
+            target_slot = 0
+            if not token.is_simulated and hasattr(self.pin_mgr, "pkcs11_mgr") and self.pin_mgr.pkcs11_mgr:
+                slots = self.pin_mgr.pkcs11_mgr.get_slots_with_token(token.token_id)
+                target_slot = slots[0] if slots else 0
+            self._current_slot = target_slot
+            self.lbl_verify_res.setText(f"Active PIN Target: {token.name} on slot {target_slot}")
+            self.lbl_verify_res.setProperty("class", "BadgeInfo")
+            self.lbl_verify_res.setStyleSheet("")
+
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(8)
+
+        # Multi-Token selector bar (shown if 2+ tokens connected)
+        self.token_bar = QFrame()
+        self.token_bar.setVisible(False)
+        tb_layout = QHBoxLayout(self.token_bar)
+        tb_layout.setContentsMargins(12, 8, 12, 8)
+        self.token_bar.setStyleSheet(
+            "background-color: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 6px;"
+        )
+        lbl_switch = QLabel("🔑 Select Target Hardware Token:")
+        lbl_switch.setStyleSheet("font-weight: bold; color: #0284c7;")
+        self.combo_tokens = QComboBox()
+        self.combo_tokens.setMinimumHeight(30)
+        self.combo_tokens.currentIndexChanged.connect(self._on_token_selected)
+        tb_layout.addWidget(lbl_switch)
+        tb_layout.addWidget(self.combo_tokens, 1)
+        root_layout.addWidget(self.token_bar)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

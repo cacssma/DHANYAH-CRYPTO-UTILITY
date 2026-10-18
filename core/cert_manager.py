@@ -31,11 +31,15 @@ class ParsedCertificate:
         label: str = "DSC Certificate",
         token_id: str = "UNKNOWN",
         ck_id: bytes = b"",
+        token_name: str = "",
+        slot: int = 0,
     ):
         self.cert_der = cert_der
         self.label = label
         self.token_id = token_id
         self.ck_id = ck_id
+        self.token_name = token_name
+        self.slot = slot
 
         # Parse X.509
         self.x509_obj = x509.load_der_x509_certificate(cert_der, default_backend())
@@ -164,6 +168,15 @@ class ParsedCertificate:
 
         return "Class 3"  # Indian default standard for modern DSC
 
+    @property
+    def is_ca(self) -> bool:
+        """Return True if certificate is a Certificate Authority."""
+        try:
+            bc = self.x509_obj.extensions.get_extension_for_oid(ExtensionOID.BASIC_CONSTRAINTS).value
+            return bc.ca
+        except Exception:
+            return "CA" in self.common_name or "Root" in self.common_name or "Sub" in self.common_name
+
     def _get_key_usage_description(self) -> str:
         usages = []
         try:
@@ -185,6 +198,8 @@ class ParsedCertificate:
         return {
             "label": self.label,
             "token_id": self.token_id,
+            "token_name": getattr(self, "token_name", ""),
+            "slot": getattr(self, "slot", 0),
             "common_name": self.common_name,
             "issuer_cn": self.issuer_cn,
             "issuer_o": self.issuer_o,
@@ -217,6 +232,37 @@ class CertManager:
     def __init__(self, pkcs11_mgr=None):
         self.pkcs11_mgr = pkcs11_mgr
         self._cached_certs: List[ParsedCertificate] = []
+
+    def get_all_certificates(self, connected_tokens: List[Any]) -> List[ParsedCertificate]:
+        """Extract certificates from all connected physical hardware tokens, tagging each with token details."""
+        all_certs: List[ParsedCertificate] = []
+        seen_fingerprints = set()
+
+        for token in connected_tokens:
+            token_id = getattr(token, "token_id", "")
+            token_name = getattr(token, "name", token_id)
+            if not token_id or token_id in ("UNKNOWN", "REMOTE_LAN"):
+                continue
+            if getattr(token, "is_simulated", False) or token_id == "SIMULATED":
+                sim = self.generate_simulated_dsc()
+                sim.token_name = "Simulated Token"
+                sim.token_id = "SIMULATED"
+                if sim.fingerprint_sha256 not in seen_fingerprints:
+                    all_certs.append(sim)
+                    seen_fingerprints.add(sim.fingerprint_sha256)
+                continue
+
+            try:
+                token_certs = self.get_token_certificates(token_id)
+                for c in token_certs:
+                    c.token_name = token_name
+                    if c.fingerprint_sha256 not in seen_fingerprints:
+                        all_certs.append(c)
+                        seen_fingerprints.add(c.fingerprint_sha256)
+            except Exception as e:
+                logger.warning(f"Error extracting certs for connected token {token_name}: {e}")
+
+        return all_certs
 
     def get_token_certificates(self, token_id: str, slot: Optional[int] = None) -> List[ParsedCertificate]:
         """

@@ -3,7 +3,7 @@
 ; Author: CA Akash J. Bhayani (mail@ca-akash.in | https://ca-akash.in)
 
 #define MyAppName "Dhanyah Crypto Utility"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.4"
 #define MyAppPublisher "CA Akash J. Bhayani"
 #define MyAppURL "https://ca-akash.in"
 #define MyAppRepoURL "https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY"
@@ -24,7 +24,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 LicenseFile=LICENSE
 OutputDir=dist_installer
-OutputBaseFilename=DhanyahCryptoUtility_Setup_v1.1.3
+OutputBaseFilename=DhanyahCryptoUtility_Setup_v{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

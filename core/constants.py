@@ -12,11 +12,11 @@ import subprocess
 from typing import Dict, List, Any, Optional
 
 # Application Version
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.4"
 
 # Loopback HTTP / WebSocket default configuration
 DEFAULT_LOOPBACK_PORT = 18200
-DEFAULT_LOOPBACK_HOST = "127.0.0.1"
+DEFAULT_LOOPBACK_HOST = "0.0.0.0"
 
 # Token identifiers enum-like keys
 TOKEN_HYP2003 = "HYP2003"
@@ -37,8 +37,10 @@ TOKEN_PROFILES: Dict[str, Dict[str, Any]] = {
         "default_user_pin": "12345678",
         # Smart Card ATR prefixes (hex uppercase without spaces)
         "atrs": [
+            "3B9F958131FE9F006646530510113171DF0000860000B5",  # HYP2003 FIPS L3 active ATR
             "3B9F958131FE9F006646530500000071DF000086000000",  # HYP2003IND_33 (FIPS Level 3)
             "3B9F958131FE9F006646530500000071DF000006000000",  # HYP2003IND / HYP2003v2
+            "3B9F958131FE9F0066465305",                        # HYP2003 prefix
             "3B9F958131FE9F006646530500000071DF",              # HYP2003 prefix
             "3B9F958131FE9F0065465305300671DF00000080",
             "3B9F958131FE9F0065465305300671DF00000081",
@@ -58,12 +60,12 @@ TOKEN_PROFILES: Dict[str, Dict[str, Any]] = {
             "HyperPKI HYP2003 CSP India v3.0",
             "EnterSafe ePass2003 CSP v1.0",
         ],
-        # Driver filenames in order of preference
+        # Driver filenames in order of preference (eps2003csp11v2 is the verified non-blocking 64-bit driver)
         "dll_names_64": [
-            "HYP2003csp11IND.dll",
             "eps2003csp11v2.dll",
-            "HYP2003csp11IND_s.dll",
+            "HYP2003csp11IND.dll",
             "eps2003csp11v2_s.dll",
+            "HYP2003csp11IND_s.dll",
             "ep11_nsp.dll",
             "hyp2003csp.dll",
             "HS2003-pkcs11.dll",
@@ -204,6 +206,8 @@ TOKEN_PROFILES: Dict[str, Dict[str, Any]] = {
         "default_pin_length": (4, 16),
         "default_user_pin": "12345678",
         "atrs": [
+            "3B8E8001504B035858585F4453435F4B45594C",          # Precision InnaITKey DSC KeyL ATR
+            "3B8E8001",                                        # InnaITKey prefix
             "3B8880012000000001000000",
             "3B888001200000",
             "3B8F8001804F0CA000000306030001000000006A",

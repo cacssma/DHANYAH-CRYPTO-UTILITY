@@ -2,6 +2,7 @@
 Dhanyah Crypto Utility - Token Hardware Banner & Monitor Widget
 """
 
+from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QClipboard, QGuiApplication
 from PySide6.QtWidgets import (
@@ -27,14 +28,16 @@ from ui.styles import get_status_pill_style
 
 
 class TokenBannerWidget(QFrame):
-    """Real-time token status banner and hardware monitor."""
+    """Real-time token status banner and hardware monitor with multi-token switching."""
 
     simulation_changed = Signal(str)  # Emits token_id or ""
+    token_selected = Signal(object)   # Emits selected DetectedToken
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setProperty("class", "CardFrame")
-        self._current_token: DetectedToken = None
+        self._current_token: Optional[DetectedToken] = None
+        self._connected_tokens: List[DetectedToken] = []
         self._is_dark_mode = True
         self._init_ui()
 
@@ -70,6 +73,27 @@ class TokenBannerWidget(QFrame):
         header_row.addWidget(self.combo_sim)
 
         layout.addLayout(header_row)
+
+        # Multi-Token Selector Bar (Shown whenever 2+ tokens are plugged in)
+        self.token_selector_frame = QFrame()
+        self.token_selector_frame.setVisible(False)
+        ts_layout = QHBoxLayout(self.token_selector_frame)
+        ts_layout.setContentsMargins(8, 6, 8, 6)
+        ts_layout.setSpacing(10)
+        self.token_selector_frame.setStyleSheet(
+            "background-color: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 6px;"
+        )
+
+        lbl_switch = QLabel("🔌 Switch Active Hardware Token:")
+        lbl_switch.setProperty("class", "FieldLabel")
+        lbl_switch.setStyleSheet("font-weight: bold; color: #0284c7;")
+        self.combo_tokens = QComboBox()
+        self.combo_tokens.setMinimumHeight(30)
+        self.combo_tokens.currentIndexChanged.connect(self._on_token_combo_changed)
+
+        ts_layout.addWidget(lbl_switch)
+        ts_layout.addWidget(self.combo_tokens, 1)
+        layout.addWidget(self.token_selector_frame)
 
         # Main Info Grid
         self.grid = QGridLayout()
@@ -155,10 +179,38 @@ class TokenBannerWidget(QFrame):
             self.lbl_status_pill.setProperty("class", "BadgeValid")
             self.lbl_status_pill.setStyleSheet(get_status_pill_style("active", self._is_dark_mode))
 
-    def update_token(self, token: DetectedToken, driver_path: str = ""):
-        """Update display with detected token details."""
-        self._current_token = token
-        if not token:
+    def update_tokens(
+        self,
+        tokens: List[DetectedToken],
+        active_token: Optional[DetectedToken] = None,
+        driver_path: str = "",
+    ):
+        """Update multi-token selector and display active token details."""
+        self._connected_tokens = list(tokens)
+        
+        # Determine active token
+        if active_token is None:
+            active_token = tokens[0] if tokens else None
+        self._current_token = active_token
+
+        # Multi-token switcher
+        if len(tokens) > 1:
+            self.token_selector_frame.setVisible(True)
+            self.combo_tokens.blockSignals(True)
+            self.combo_tokens.clear()
+            active_idx = 0
+            for idx, t in enumerate(tokens):
+                label = f"{t.name}  |  Slot: {t.reader_name}  ({t.fips_level})"
+                self.combo_tokens.addItem(label, t)
+                if active_token and (t.reader_name == active_token.reader_name or t.token_id == active_token.token_id):
+                    active_idx = idx
+            self.combo_tokens.setCurrentIndex(active_idx)
+            self.combo_tokens.blockSignals(False)
+            self.lbl_status_pill.setText(f"● {len(tokens)} TOKENS CONNECTED")
+        else:
+            self.token_selector_frame.setVisible(False)
+
+        if not active_token:
             self.lbl_status_pill.setText("NO TOKEN INSERTED")
             self._update_pill_style()
             self.lbl_device_name.setText("Please insert a USB Crypto Token (HYP 2003, mToken, ProxKey, InnaITKey)")
@@ -168,34 +220,46 @@ class TokenBannerWidget(QFrame):
             self.lbl_driver_info.setText("System: Smart Card Service running. Ready for token hotplug.")
             return
 
-        # Token Connected
-        if getattr(token, "token_id", "") == "REMOTE_LAN":
+        # Active Token Display
+        if getattr(active_token, "token_id", "") == "REMOTE_LAN":
             self.lbl_status_pill.setText("🌐 VIRTUAL LAN TOKEN")
             self._update_pill_style()
             sim_tag = " [NETWORK DSC MESH]"
-        elif token.is_simulated:
+        elif active_token.is_simulated:
             self.lbl_status_pill.setText("SIMULATION MODE")
             self._update_pill_style()
             sim_tag = " [DEMO SIMULATION]"
         else:
-            # Physical Hardware Token
             self.combo_sim.blockSignals(True)
             self.combo_sim.setCurrentIndex(0)  # Live Hardware
             self.combo_sim.blockSignals(False)
 
-            self.lbl_status_pill.setText("● ACTIVE HARDWARE TOKEN")
+            if len(tokens) <= 1:
+                self.lbl_status_pill.setText("● ACTIVE HARDWARE TOKEN")
             self._update_pill_style()
             sim_tag = " [PHYSICAL HARDWARE]"
 
-        self.lbl_device_name.setText(f"{token.name}{sim_tag}")
-        self.lbl_reader_name.setText(token.reader_name)
-        self.lbl_atr.setText(token.atr or "Simulated ATR Signature")
-        self.lbl_specs.setText(f"Vendor: {token.vendor}  |  Level: {token.fips_level}  |  Serial: {token.serial_number}")
+        self.lbl_device_name.setText(f"{active_token.name}{sim_tag}")
+        self.lbl_reader_name.setText(active_token.reader_name)
+        self.lbl_atr.setText(active_token.atr or "Simulated ATR Signature")
+        self.lbl_specs.setText(f"Vendor: {active_token.vendor}  |  Level: {active_token.fips_level}  |  Serial: {active_token.serial_number}")
 
         if driver_path:
             self.lbl_driver_info.setText(f"Active PKCS#11 Library: {driver_path}")
         else:
-            self.lbl_driver_info.setText(f"Subsystem Status: Native MiniDriver & PKCS#11 Active for {token.name}")
+            self.lbl_driver_info.setText(f"Subsystem Status: Native MiniDriver & PKCS#11 Active for {active_token.name}")
+
+    def update_token(self, token: Optional[DetectedToken], driver_path: str = ""):
+        """Backward-compatible single-token update method."""
+        tokens = [token] if token else []
+        self.update_tokens(tokens, token, driver_path)
+
+    def _on_token_combo_changed(self, index: int):
+        token = self.combo_tokens.currentData()
+        if token:
+            self._current_token = token
+            self.update_tokens(self._connected_tokens, token)
+            self.token_selected.emit(token)
 
     def _copy_atr(self):
         text = self.lbl_atr.text()

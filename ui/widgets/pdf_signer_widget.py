@@ -66,7 +66,9 @@ class PdfSignerWidget(QWidget):
 
         for c in certs:
             pan_str = f" [PAN: {c.pan_number}]" if c.pan_number else ""
-            label = f"{c.common_name} ({c.cert_class}){pan_str}"
+            tok_name = getattr(c, "token_name", "") or getattr(c, "token_id", "")
+            tok_str = f" [{tok_name}]" if tok_name else ""
+            label = f"{c.common_name} ({c.cert_class}){tok_str}{pan_str}"
             self.combo_certs.addItem(label, c)
             self.combo_batch_certs.addItem(label, c)
 
@@ -502,11 +504,13 @@ class PdfSignerWidget(QWidget):
         self.lbl_single_status.setStyleSheet("")
 
         try:
+            target_token_id = getattr(cert, "token_id", None) or self._current_token_id or "SIMULATED"
+            target_slot = getattr(cert, "slot", 0) or self._current_slot
             res: SignResult = self.signer.sign_pdf(
                 input_pdf_path=in_path,
                 output_pdf_path=out_path,
-                token_id=self._current_token_id or "SIMULATED",
-                slot=self._current_slot,
+                token_id=target_token_id,
+                slot=target_slot,
                 pin=pin,
                 cert=cert,
                 reason=self.combo_reason.currentText(),
@@ -648,11 +652,13 @@ class PdfSignerWidget(QWidget):
                 self.batch_table.setItem(row, 2, status_item)
 
         try:
+            target_token_id = getattr(cert, "token_id", None) or self._current_token_id or "SIMULATED"
+            target_slot = getattr(cert, "slot", 0) or self._current_slot
             results = self.signer.sign_pdf_batch(
                 input_files=self._batch_files,
                 output_dir=out_dir,
-                token_id=self._current_token_id or "SIMULATED",
-                slot=self._current_slot,
+                token_id=target_token_id,
+                slot=target_slot,
                 pin=pin,
                 cert=cert,
                 reason=self.combo_reason.currentText(),

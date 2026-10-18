@@ -363,8 +363,17 @@ class LanMeshManager:
                 # Refresh local IP
                 self.local_ip = get_local_lan_ip()
 
-                # Build token and certificate payload
-                token = self.get_local_token_fn() if self.get_local_token_fn else None
+                # Query local tokens
+                tokens = []
+                if hasattr(self, "get_local_tokens_fn") and self.get_local_tokens_fn:
+                    tokens = [t for t in self.get_local_tokens_fn() if t]
+                elif self.get_local_token_fn:
+                    prim = self.get_local_token_fn()
+                    if prim:
+                        tokens = [prim]
+
+                token = tokens[0] if tokens else None
+                tok_names = " + ".join([t.name for t in tokens]) if tokens else ""
                 certs = self.get_local_certs_fn() if self.get_local_certs_fn else []
 
                 cert_payloads = []
@@ -378,6 +387,7 @@ class LanMeshManager:
                             "valid_from": c.valid_from.isoformat() if hasattr(c, "valid_from") and c.valid_from else "",
                             "valid_to": c.valid_to.isoformat() if hasattr(c, "valid_to") and c.valid_to else "",
                             "serial_hex": getattr(c, "serial_number_hex", ""),
+                            "token_name": getattr(c, "token_name", "") or (token.name if token else ""),
                         })
 
                 beacon_data = {
@@ -389,16 +399,24 @@ class LanMeshManager:
                     "version": APP_VERSION,
                     "sharing_enabled": self.is_sharing_enabled,
                     "require_prompt": self.require_prompt_before_sign,
-                    "has_token": bool(token),
-                    "token_name": token.name if token else "",
+                    "has_token": bool(tokens),
+                    "token_name": tok_names,
                     "token_id": token.token_id if token else "",
-                    "is_simulated": getattr(token, "is_simulated", False) if token else False,
+                    "tokens_count": len(tokens),
+                    "is_simulated": any(getattr(t, "is_simulated", False) for t in tokens) if tokens else False,
                     "certificates": cert_payloads,
                     "timestamp": time.time(),
                 }
 
                 message = json.dumps(beacon_data).encode("utf-8")
-                sock.sendto(message, ("<broadcast>", self.broadcast_port))
+                try:
+                    sock.sendto(message, ("<broadcast>", self.broadcast_port))
+                except Exception:
+                    pass
+                try:
+                    sock.sendto(message, ("255.255.255.255", self.broadcast_port))
+                except Exception:
+                    pass
             except Exception as e:
                 logger.debug(f"Broadcast beacon send warning: {e}")
 

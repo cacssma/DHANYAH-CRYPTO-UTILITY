@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
 
         # Provider callbacks to publish local hardware tokens and certificates to LAN
         self.mesh_mgr.get_local_token_fn = self.detector.get_primary_token
+        self.mesh_mgr.get_local_tokens_fn = self.detector.get_connected_tokens
         self.mesh_mgr.get_local_certs_fn = lambda: getattr(self, "cert_table", None) and self.cert_table.certificates or []
 
         # Start LAN discovery and broadcast
@@ -247,6 +248,7 @@ class MainWindow(QMainWindow):
         vd_layout.setSpacing(12)
         self.banner = TokenBannerWidget()
         self.banner.simulation_changed.connect(self._on_simulation_changed)
+        self.banner.token_selected.connect(self._on_active_token_switched)
         vd_layout.addWidget(self.banner)
 
         self.dash_cert_table = CertTableWidget()
@@ -331,89 +333,30 @@ class MainWindow(QMainWindow):
     def _on_simulation_changed(self, token_id: str):
         """Triggered when user toggles simulation mode from banner dropdown."""
         self.detector.set_simulation_mode(token_id if token_id else None)
-        token = self.detector.get_primary_token()
-        if token:
-            self._on_token_inserted_ui(token)
+        tokens = self.detector.get_connected_tokens()
+        if tokens:
+            self._refresh_multi_tokens_ui(tokens)
         else:
             self._reset_to_idle_ui()
 
     def _check_initial_state(self):
-        """Check if any token is already plugged in at launch without false disconnect warning."""
-        token = self.detector.get_primary_token()
-        if token:
-            self._on_token_inserted_ui(token)
+        """Check if any tokens are already plugged in at launch without false disconnect warning."""
+        tokens = self.detector.get_connected_tokens()
+        if tokens:
+            self._refresh_multi_tokens_ui(tokens)
         else:
             self._reset_to_idle_ui()
 
     @Slot(object)
     def _on_token_inserted_ui(self, token: DetectedToken):
         logger.info(f"UI handling token inserted: {token}")
-        self.active_token = token
-
-        # If a virtual remote token was mounted, detach it so physical hardware takes precedence
-        if self.mesh_mgr and self.mesh_mgr.mounted_peer:
-            logger.info("Physical token inserted; detaching remote virtual token.")
-            self.mesh_mgr.unmount_remote_peer()
-            if hasattr(self, "mesh_widget"):
-                self.mesh_widget._update_mount_banner()
-                self.mesh_widget._render_peer_cards(self.mesh_mgr.get_peers())
-
-        # Determine driver path
-        driver_status = self.pkcs11_mgr.get_driver_status(token.token_id)
-        driver_path = driver_status.dll_path if driver_status and driver_status.is_loadable else ""
-
-        # Update banner
-        self.banner.update_token(token, driver_path)
-
-        # Extract certificates
-        certs = []
-        slot_id = None
-        if token.is_simulated or token.token_id == "SIMULATED":
-            certs = [self.cert_mgr.generate_simulated_dsc()]
-        else:
-            slots = self.pkcs11_mgr.get_slots_with_token(token.token_id)
-            slot_id = slots[0] if slots else None
-            certs = self.cert_mgr.get_token_certificates(token.token_id, slot=slot_id)
-
-        target_slot = slot_id if slot_id is not None else 0
-
-        # Update certificate tables
-        self.dash_cert_table.set_certificates(certs)
-        self.cert_table.set_certificates(certs)
-
-        # Synchronize certificates to Windows Personal Store with CSP private key link
-        if not token.is_simulated and certs:
-            try:
-                from core.smartcard_registrar import SmartCardRegistrar
-                synced_count, sync_msg = SmartCardRegistrar.sync_token_certificates_to_store(token.token_id, certs)
-                logger.info(f"Windows Store Key-Linker: {sync_msg}")
-            except Exception as e_sync:
-                logger.warning(f"Could not auto-sync certificates to Windows store: {e_sync}")
-
-        # Update PIN context
-        self.pin_widget.set_token_context(
-            token_id=token.token_id,
-            slot=target_slot,
-            is_simulated=token.is_simulated,
-        )
-
-        # Update Signer context
-        self.signer_widget.set_token_context(
-            token_id=token.token_id,
-            slot=target_slot,
-            certs=certs,
-            is_simulated=token.is_simulated,
-        )
-
-        status_text = f"Active Token: {token.name} on {token.reader_name} | FIPS Security: {token.fips_level}"
-        if not token.is_simulated:
-            status_text += " | Windows Personal Store Key-Linked"
-        self.status_bar.showMessage(status_text)
+        tokens = self.detector.get_connected_tokens()
+        if not any(t.reader_name == token.reader_name for t in tokens):
+            tokens.append(token)
+        self._refresh_multi_tokens_ui(tokens, active_token=token)
 
         # Update System Tray
         if self.tray_icon:
-            self.tray_token_action.setText(f"Active: {token.name} ({token.fips_level})")
-            self.tray_icon.setToolTip(f"Dhanyah Crypto Utility - {token.name} Connected")
             self.tray_icon.showMessage(
                 "Crypto Token Connected",
                 f"{token.name} detected on {token.reader_name}\nFIPS Security: {token.fips_level}",
@@ -433,18 +376,123 @@ class MainWindow(QMainWindow):
         was_active = self.active_token is not None
         old_token = self.active_token
 
-        self._reset_to_idle_ui()
+        # Check remaining tokens (excluding the reader that just disconnected)
+        remaining_tokens = [t for t in self.detector.get_connected_tokens() if t.reader_name != reader_name]
 
-        # Only notify via system tray if a token was actually active before being disconnected
-        if was_active and self.tray_icon:
-            token_desc = old_token.name if old_token else "Crypto Token"
-            slot_desc = reader_name if reader_name else (old_token.reader_name if old_token else "reader slot")
-            self.tray_icon.showMessage(
-                "Crypto Token Disconnected",
-                f"{token_desc} disconnected from {slot_desc}.",
-                QSystemTrayIcon.Warning,
-                2000,
-            )
+        if remaining_tokens:
+            logger.info(f"Token disconnected from {reader_name}, but {len(remaining_tokens)} token(s) remain connected.")
+            next_active = remaining_tokens[0]
+            self._refresh_multi_tokens_ui(remaining_tokens, active_token=next_active)
+            if self.tray_icon:
+                self.tray_icon.showMessage(
+                    "Crypto Token Disconnected",
+                    f"Token removed from {reader_name}.\nActive token is now: {next_active.name}",
+                    QSystemTrayIcon.Information,
+                    2000,
+                )
+        else:
+            self._reset_to_idle_ui()
+            if was_active and self.tray_icon:
+                token_desc = old_token.name if old_token else "Crypto Token"
+                slot_desc = reader_name if reader_name else (old_token.reader_name if old_token else "reader slot")
+                self.tray_icon.showMessage(
+                    "Crypto Token Disconnected",
+                    f"{token_desc} disconnected from {slot_desc}.",
+                    QSystemTrayIcon.Warning,
+                    2000,
+                )
+
+    def _on_active_token_switched(self, token: DetectedToken):
+        """User switched the active token via banner or PIN selector."""
+        logger.info(f"User switched active token to: {token.name} ({token.reader_name})")
+        tokens = self.detector.get_connected_tokens()
+        if not any(t.reader_name == token.reader_name for t in tokens):
+            tokens.append(token)
+        self._refresh_multi_tokens_ui(tokens, active_token=token)
+
+    def _refresh_multi_tokens_ui(self, tokens: List[DetectedToken], active_token: Optional[DetectedToken] = None):
+        """Update banner, cert tables, PIN, and Signer widgets for connected token(s)."""
+        if not tokens:
+            self._reset_to_idle_ui()
+            return
+
+        if not active_token or not any(t.reader_name == active_token.reader_name for t in tokens):
+            active_token = tokens[0]
+
+        self.active_token = active_token
+
+        # If a virtual remote token was mounted, detach it so physical hardware takes precedence
+        if self.mesh_mgr and self.mesh_mgr.mounted_peer:
+            logger.info("Physical token inserted; detaching remote virtual token.")
+            self.mesh_mgr.unmount_remote_peer()
+            if hasattr(self, "mesh_widget"):
+                self.mesh_widget._update_mount_banner()
+                self.mesh_widget._render_peer_cards(self.mesh_mgr.get_peers())
+
+        # Determine driver path for active token
+        driver_status = self.pkcs11_mgr.get_driver_status(active_token.token_id)
+        driver_path = driver_status.dll_path if driver_status and driver_status.is_loadable else ""
+
+        # Update banner
+        self.banner.update_tokens(tokens, active_token, driver_path)
+
+        # Extract certificates from all connected tokens
+        certs = self.cert_mgr.get_all_certificates(tokens)
+
+        # Update certificate tables (shows certificates from ALL connected tokens)
+        self.dash_cert_table.set_certificates(certs)
+        self.cert_table.set_certificates(certs)
+
+        # Synchronize certificates to Windows Personal Store with CSP private key link
+        if certs:
+            for t in tokens:
+                if not t.is_simulated:
+                    token_certs = [
+                        c for c in certs
+                        if getattr(c, "token_name", "") == t.name or getattr(c, "token_id", "") == t.token_id
+                    ]
+                    if token_certs:
+                        try:
+                            from core.smartcard_registrar import SmartCardRegistrar
+                            synced_count, sync_msg = SmartCardRegistrar.sync_token_certificates_to_store(t.token_id, token_certs)
+                            logger.info(f"Windows Store Key-Linker ({t.name}): {sync_msg}")
+                        except Exception as e_sync:
+                            logger.warning(f"Could not auto-sync certificates to Windows store: {e_sync}")
+
+        # Determine active token slot
+        target_slot = 0
+        if not active_token.is_simulated and active_token.token_id != "SIMULATED":
+            slots = self.pkcs11_mgr.get_slots_with_token(active_token.token_id)
+            if slots:
+                target_slot = slots[0]
+
+        # Update PIN context
+        self.pin_widget.set_token_context(
+            token_id=active_token.token_id,
+            slot=target_slot,
+            is_simulated=active_token.is_simulated,
+            tokens=tokens,
+        )
+
+        # Update Signer context
+        self.signer_widget.set_token_context(
+            token_id=active_token.token_id,
+            slot=target_slot,
+            certs=certs,
+            is_simulated=active_token.is_simulated,
+        )
+
+        # Status Bar
+        token_count_text = f"[{len(tokens)} Token(s) Connected]" if len(tokens) > 1 else ""
+        status_text = f"Active: {active_token.name} on {active_token.reader_name} {token_count_text} | FIPS: {active_token.fips_level}"
+        if not active_token.is_simulated:
+            status_text += " | Windows Personal Store Key-Linked"
+        self.status_bar.showMessage(status_text)
+
+        # Update System Tray
+        if self.tray_icon:
+            self.tray_token_action.setText(f"Active: {active_token.name} ({active_token.fips_level})")
+            self.tray_icon.setToolTip(f"Dhanyah Crypto Utility - {active_token.name} Active ({len(tokens)} token(s))")
 
     def _on_remote_token_mounted(self, peer: LanPeer, cert: Optional[LanCertificateInfo]):
         """Triggered when user mounts a remote workstation's token as active virtual token."""

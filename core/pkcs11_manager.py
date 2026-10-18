@@ -131,11 +131,16 @@ class PKCS11Manager:
             search_roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
         for root in search_roots:
-            hyp_cand = os.path.join(root, "drivers", "hyp2003", "HYP2003csp11IND.dll" if IS_64BIT else "HYP2003csp11IND.x86.dll")
-            if not os.path.exists(hyp_cand):
-                hyp_cand = os.path.join(root, "drivers", "hyp2003", "HYP2003csp11IND.dll")
-            if not os.path.exists(hyp_cand):
+            if IS_64BIT:
                 hyp_cand = os.path.join(root, "drivers", "hyp2003", "eps2003csp11v2.dll")
+                if not os.path.exists(hyp_cand):
+                    hyp_cand = os.path.join(root, "drivers", "hyp2003", "HYP2003csp11IND.dll")
+            else:
+                hyp_cand = os.path.join(root, "drivers", "hyp2003", "HYP2003csp11IND.x86.dll")
+                if not os.path.exists(hyp_cand):
+                    hyp_cand = os.path.join(root, "drivers", "hyp2003", "HYP2003csp11IND.dll")
+                if not os.path.exists(hyp_cand):
+                    hyp_cand = os.path.join(root, "drivers", "hyp2003", "eps2003csp11v2.dll")
 
             bundled_map = {
                 TOKEN_HYP2003: hyp_cand,
@@ -150,13 +155,13 @@ class PKCS11Manager:
         # 1. Direct checks for known paths discovered on Indian Windows systems
         if token_id == TOKEN_HYP2003:
             candidates.extend([
-                r"C:\Windows\System32\HYP2003csp11IND.dll",
                 r"C:\Windows\System32\eps2003csp11v2.dll",
-                r"C:\Windows\SysWOW64\HYP2003csp11IND.dll",
+                r"C:\Windows\System32\HYP2003csp11IND.dll",
                 r"C:\Windows\SysWOW64\eps2003csp11v2.dll",
+                r"C:\Windows\SysWOW64\HYP2003csp11IND.dll",
                 r"C:\Program Files (x86)\IDSign CA\IDSignTokensUtility\HS2003-pkcs11.dll",
-                r"C:\Windows\System32\HYP2003csp11IND_s.dll",
                 r"C:\Windows\System32\eps2003csp11v2_s.dll",
+                r"C:\Windows\System32\HYP2003csp11IND_s.dll",
             ])
         elif token_id == TOKEN_MTOKEN:
             candidates.extend([
@@ -356,7 +361,7 @@ class PKCS11Manager:
 
         th = threading.Thread(target=_query_slots, daemon=True, name=f"PKCS11-Slots-{token_id}")
         th.start()
-        th.join(timeout=2.5)
+        th.join(timeout=6.0)
         if th.is_alive():
             logger.warning(f"Slot query timed out for token '{token_id}'")
             return []

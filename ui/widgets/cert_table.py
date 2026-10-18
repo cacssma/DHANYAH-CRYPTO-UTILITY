@@ -31,6 +31,10 @@ class CertTableWidget(QFrame):
         self._certificates: List[ParsedCertificate] = []
         self._init_ui()
 
+    @property
+    def certificates(self) -> List[ParsedCertificate]:
+        return self._certificates
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -54,9 +58,10 @@ class CertTableWidget(QFrame):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             "Signer Name (CN)",
+            "Device / Token",
             "Class",
             "PAN Number",
             "Issuing CA",
@@ -69,6 +74,7 @@ class CertTableWidget(QFrame):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.verticalHeader().setVisible(False)
@@ -103,28 +109,34 @@ class CertTableWidget(QFrame):
             item_cn.setFlags(item_cn.flags() ^ Qt.ItemIsEditable)
             self.table.setItem(row, 0, item_cn)
 
+            # Device / Token
+            dev_name = getattr(cert, "token_name", "") or cert.token_id
+            item_dev = QTableWidgetItem(dev_name)
+            item_dev.setFlags(item_dev.flags() ^ Qt.ItemIsEditable)
+            self.table.setItem(row, 1, item_dev)
+
             # Class
             item_class = QTableWidgetItem(cert.cert_class)
             item_class.setTextAlignment(Qt.AlignCenter)
             item_class.setFlags(item_class.flags() ^ Qt.ItemIsEditable)
-            self.table.setItem(row, 1, item_class)
+            self.table.setItem(row, 2, item_class)
 
             # PAN
             item_pan = QTableWidgetItem(cert.pan_number or "N/A")
             item_pan.setTextAlignment(Qt.AlignCenter)
             item_pan.setFlags(item_pan.flags() ^ Qt.ItemIsEditable)
-            self.table.setItem(row, 2, item_pan)
+            self.table.setItem(row, 3, item_pan)
 
             # Issuer
             item_issuer = QTableWidgetItem(cert.issuer_cn)
             item_issuer.setFlags(item_issuer.flags() ^ Qt.ItemIsEditable)
-            self.table.setItem(row, 3, item_issuer)
+            self.table.setItem(row, 4, item_issuer)
 
             # Expiry
             item_exp = QTableWidgetItem(cert.valid_to.strftime("%d-%b-%Y"))
             item_exp.setTextAlignment(Qt.AlignCenter)
             item_exp.setFlags(item_exp.flags() ^ Qt.ItemIsEditable)
-            self.table.setItem(row, 4, item_exp)
+            self.table.setItem(row, 5, item_exp)
 
             # Status with Badge Widget
             badge = QLabel(cert.expiry_status_text)
@@ -140,7 +152,7 @@ class CertTableWidget(QFrame):
             cw_layout = QHBoxLayout(cell_widget)
             cw_layout.setContentsMargins(4, 2, 4, 2)
             cw_layout.addWidget(badge)
-            self.table.setCellWidget(row, 5, cell_widget)
+            self.table.setCellWidget(row, 6, cell_widget)
 
         # Select first row by default
         if certs:
