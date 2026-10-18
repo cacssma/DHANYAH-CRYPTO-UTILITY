@@ -20,13 +20,14 @@
 In India, Chartered Accountants, Tax Professionals, Company Secretaries, and Businesses currently juggle **4 distinct proprietary vendor management tools**. Each tool has conflicting drivers, outdated user interfaces, and separate middleware. 
 
 **Dhanyah Crypto Utility** solves this by providing:
+- **🌐 Network DSC Mesh (New in v1.1.0)**: Zero-config peer discovery over LAN (Wi-Fi/Ethernet). Share connected USB tokens from any office workstation and mount them virtually on other PCs for remote signing across web portals.
+- **🏛️ Multi-Port Govt Loopback Gateway (`:15085`, `:18200`, `:26443`)**: Coexists safely with official eMudhra emBridge, providing seamless plug-and-play signing in **MCA V3, GST Portal, Income Tax, EPFO, and e-Tenders**.
 - **100% Zero-Install Portability**: Bundles verified standalone 64-bit PKCS#11 libraries for all 4 tokens. You do **NOT** need to install any proprietary vendor utilities.
 - **Unified Hardware Auto-Detection**: Uses Windows Smart Card Resource Manager (`winscard`) to automatically detect tokens via ATR (Answer To Reset) signatures and reader hardware strings.
 - **Dynamic Slot Auto-Resolution**: Automatically queries and targets the token's active hardware slot ID (e.g. `0x10000000` on Longmai mToken), eliminating `CKR_FUNCTION_NOT_SUPPORTED` errors.
 - **Indian CCA Certificate Inspector**: Automatically extracts and displays Subject Common Name, PAN Number (OID `2.5.4.45`), Certificate Class (Class 3 / Class 2), Issuing CA (eMudhra, Capricorn, VSign, IDSign, Pantasign), and 30-day expiration warnings.
 - **Hardware-Isolated Signing**: Private keys never leave the secure hardware cryptographic boundary.
-- **Built-in PAdES PDF Digital Signer**: Standalone PDF signer creating `adbe.pkcs7.detached` signatures with visible placement or invisible compliance.
-- **Localhost HTTP REST Gateway (`127.0.0.1:18200`)**: Loopback service with CORS support, enabling web portals (MCA, GST, Income Tax, EPFO, e-Tenders) and desktop accounting tools (Tally, ERPs) to sign hashes and documents.
+- **Dual-Tab PAdES PDF Digital Signer**: Standalone Single and Batch PDF signer creating `adbe.pkcs7.detached` signatures with visible placement or invisible compliance.
 - **Modern UI with Light / Dark Mode**: Enterprise desktop interface with real-time theme toggling (`☀️ Light Mode` / `🌙 Dark Mode`).
 
 ---
@@ -44,10 +45,10 @@ In India, Chartered Accountants, Tax Professionals, Company Secretaries, and Bus
 
 ## 🚀 Quick Start (Pre-built Windows Installer)
 
-### Download & Install (v1.0.1)
-[![Download Dhanyah Crypto Utility v1.0.1](https://img.shields.io/badge/Download-Installer%20v1.0.1%20(.exe)-blue?style=for-the-badge&logo=windows)](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.0.1/DhanyahCryptoUtility_Setup_v1.0.1.exe)
+### Download & Install (v1.1.0)
+[![Download Dhanyah Crypto Utility v1.1.0](https://img.shields.io/badge/Download-Installer%20v1.1.0%20(.exe)-blue?style=for-the-badge&logo=windows)](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.1.0/DhanyahCryptoUtility_Setup_v1.1.0.exe)
 
-1. Download **[DhanyahCryptoUtility_Setup_v1.0.1.exe](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.0.1/DhanyahCryptoUtility_Setup_v1.0.1.exe)** from the [Releases](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases) page or from the `releases/` directory in this repository.
+1. Download **[DhanyahCryptoUtility_Setup_v1.1.0.exe](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.1.0/DhanyahCryptoUtility_Setup_v1.1.0.exe)** from the [Releases](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases) page or from the `releases/` directory in this repository.
 2. Run the setup installer (Administrator privileges required to register Windows Smart Card MiniDrivers & 32-bit SysWOW64 DLLs).
 3. Plug in any of the 4 supported USB tokens — the application will automatically detect the token, display its certificates, and allow safe PIN operations and signing.
 

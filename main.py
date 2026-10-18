@@ -53,6 +53,7 @@ from core.pkcs11_manager import PKCS11Manager
 from core.cert_manager import CertManager
 from core.pin_manager import PinManager
 from core.signer import TokenSigner
+from core.lan_mesh import LanMeshManager
 from server.loopback_server import LoopbackServer
 from core.constants import DEFAULT_LOOPBACK_PORT, DEFAULT_LOOPBACK_HOST
 
@@ -65,6 +66,10 @@ def run_headless(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
     if args.sim:
         detector.set_simulation_mode(args.sim.upper())
 
+    mesh_mgr = LanMeshManager(local_port=args.port)
+    mesh_mgr.get_local_token_fn = detector.get_primary_token
+    mesh_mgr.start()
+
     server = LoopbackServer(
         token_detector=detector,
         pkcs11_mgr=pkcs11_mgr,
@@ -73,6 +78,7 @@ def run_headless(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
         signer=signer,
         host=DEFAULT_LOOPBACK_HOST,
         port=args.port,
+        lan_mesh_mgr=mesh_mgr,
     )
     server.start()
     logger.info(f"Gateway listening on http://{DEFAULT_LOOPBACK_HOST}:{args.port}")
@@ -85,6 +91,7 @@ def run_headless(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
     except KeyboardInterrupt:
         logger.info("Shutting down headless service...")
         server.stop()
+        mesh_mgr.stop()
         detector.stop()
 
 
@@ -132,6 +139,9 @@ def run_gui(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
     if args.sim:
         detector.set_simulation_mode(args.sim.upper())
 
+    # Initialize LAN Mesh Manager
+    mesh_mgr = LanMeshManager(local_port=args.port)
+
     # Start loopback server
     server = LoopbackServer(
         token_detector=detector,
@@ -141,6 +151,7 @@ def run_gui(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
         signer=signer,
         host=DEFAULT_LOOPBACK_HOST,
         port=args.port,
+        lan_mesh_mgr=mesh_mgr,
     )
     server.start()
 
@@ -151,11 +162,13 @@ def run_gui(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
         pin_mgr=pin_mgr,
         signer=signer,
         server=server,
+        mesh_mgr=mesh_mgr,
     )
     window.show()
 
     exit_code = app.exec()
     detector.stop()
+    mesh_mgr.stop()
     server.stop()
     sys.exit(exit_code)
 

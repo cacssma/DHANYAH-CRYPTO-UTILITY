@@ -170,6 +170,10 @@ class PKCS11Manager:
             candidates.extend([
                 r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
                 r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+                r"C:\Windows\System32\Watchdata\PROXKey CSP India V2.0\WDPKCS.dll",
+                r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V2.0\WDPKCS.dll",
+                r"C:\Windows\System32\WDPKCS.dll",
+                r"C:\Windows\SysWOW64\WDPKCS.dll",
                 r"C:\Program Files (x86)\Watchdata\WD PROXKey\SignatureP11.dll",
             ])
         elif token_id == TOKEN_INNAIT:
@@ -312,20 +316,54 @@ class PKCS11Manager:
                     pass
 
         import PyKCS11
+        import threading
         pkcs11 = PyKCS11.PyKCS11Lib()
-        pkcs11.load(status.dll_path)
+
+        load_err: List[Optional[Exception]] = [None]
+
+        def _do_load():
+            try:
+                pkcs11.load(status.dll_path)
+            except Exception as e:
+                load_err[0] = e
+
+        load_th = threading.Thread(target=_do_load, daemon=True, name=f"PKCS11-Load-{token_id}")
+        load_th.start()
+        load_th.join(timeout=3.0)
+        if load_th.is_alive():
+            raise RuntimeError(
+                f"PKCS#11 driver '{status.dll_path}' timed out during initialization (locked by system mutex)."
+            )
+        if load_err[0]:
+            raise load_err[0]
+
         self._loaded_libs[token_id] = pkcs11
         return pkcs11
 
     def get_slots_with_token(self, token_id: str) -> List[int]:
         """Get list of slot numbers that currently have a token inserted."""
-        try:
-            lib = self.get_pkcs11_lib(token_id)
-            slots = lib.getSlotList(tokenPresent=True)
-            return list(slots)
-        except Exception as e:
-            logger.warning(f"Error querying slots for {token_id}: {e}")
+        import threading
+        result_slots: List[int] = []
+        err_box: List[Optional[Exception]] = [None]
+
+        def _query_slots():
+            try:
+                lib = self.get_pkcs11_lib(token_id)
+                slots = lib.getSlotList(tokenPresent=True)
+                result_slots.extend(list(slots))
+            except Exception as e:
+                err_box[0] = e
+
+        th = threading.Thread(target=_query_slots, daemon=True, name=f"PKCS11-Slots-{token_id}")
+        th.start()
+        th.join(timeout=2.5)
+        if th.is_alive():
+            logger.warning(f"Slot query timed out for token '{token_id}'")
             return []
+        if err_box[0]:
+            logger.warning(f"Error querying slots for {token_id}: {err_box[0]}")
+            return []
+        return result_slots
 
     def get_token_info(self, token_id: str, slot: int) -> Dict[str, Any]:
         """Query CK_TOKEN_INFO structure for given slot."""

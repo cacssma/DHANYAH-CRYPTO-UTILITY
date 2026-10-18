@@ -9,6 +9,7 @@ Extracts CKO_CERTIFICATE objects and parses Indian DSC metadata:
 
 import datetime
 import logging
+import sys
 from typing import Dict, List, Optional, Tuple, Any
 
 from cryptography import x509
@@ -223,94 +224,155 @@ class CertManager:
         Read-only; does NOT require or expose private keys.
         Auto-resolves slot with hardware token present.
         """
-        if not self.pkcs11_mgr:
+        certs: List[ParsedCertificate] = []
+        if self.pkcs11_mgr:
+            import PyKCS11
+            from PyKCS11 import CKO_CERTIFICATE, CKA_CLASS, CKA_VALUE, CKA_LABEL, CKA_ID
+
+            try:
+                lib = self.pkcs11_mgr.get_pkcs11_lib(token_id)
+
+                # Auto-resolve active slot(s)
+                slots_to_check = []
+                if slot is not None:
+                    slots_to_check = [slot]
+                else:
+                    if hasattr(self.pkcs11_mgr, "get_slots_with_token"):
+                        active_slots = self.pkcs11_mgr.get_slots_with_token(token_id)
+                        if active_slots:
+                            slots_to_check = list(active_slots)
+
+                    if not slots_to_check:
+                        try:
+                            present_slots = lib.getSlotList(tokenPresent=True)
+                            if present_slots:
+                                slots_to_check = list(present_slots)
+                            else:
+                                all_slots = lib.getSlotList(tokenPresent=False)
+                                slots_to_check = list(all_slots) if all_slots else [0]
+                        except Exception:
+                            slots_to_check = [0]
+
+                for s in slots_to_check:
+                    try:
+                        session = lib.openSession(s, PyKCS11.CKF_SERIAL_SESSION)
+                    except Exception as ex:
+                        logger.debug(f"Could not open session on slot {s} of {token_id}: {ex}")
+                        continue
+
+                    try:
+                        # Query all certificate objects
+                        objects = session.findObjects([(CKA_CLASS, CKO_CERTIFICATE)])
+                        for obj in objects:
+                            try:
+                                attrs = session.getAttributeValue(obj, [CKA_VALUE, CKA_LABEL, CKA_ID])
+                                raw_val, raw_label, raw_id = attrs[0], attrs[1], attrs[2]
+
+                                # CKA_VALUE -> bytes
+                                if isinstance(raw_val, (tuple, list)):
+                                    val = bytes(raw_val)
+                                elif isinstance(raw_val, str):
+                                    val = raw_val.encode("latin-1")
+                                else:
+                                    val = bytes(raw_val) if raw_val else b""
+
+                                # CKA_LABEL -> str
+                                if isinstance(raw_label, str):
+                                    label = raw_label.strip()
+                                elif isinstance(raw_label, (tuple, list)):
+                                    label = "".join(chr(c) for c in raw_label if 32 <= c <= 126).strip()
+                                else:
+                                    label = str(raw_label).strip() if raw_label else "DSC Certificate"
+
+                                # CKA_ID -> bytes
+                                if isinstance(raw_id, (tuple, list)):
+                                    ck_id = bytes(raw_id)
+                                elif isinstance(raw_id, str):
+                                    ck_id = raw_id.encode("latin-1")
+                                else:
+                                    ck_id = bytes(raw_id) if raw_id else b""
+
+                                if val:
+                                    parsed = ParsedCertificate(
+                                        cert_der=val,
+                                        label=label or "DSC Certificate",
+                                        token_id=token_id,
+                                        ck_id=ck_id,
+                                    )
+                                    # Avoid duplicates by fingerprint
+                                    if not any(c.fingerprint_sha256 == parsed.fingerprint_sha256 for c in certs):
+                                        certs.append(parsed)
+                            except Exception as e:
+                                logger.warning(f"Error parsing cert object: {e}")
+                    finally:
+                        session.closeSession()
+            except Exception as e:
+                logger.error(f"Failed to extract certificates from PKCS#11 for {token_id}: {e}")
+
+        # Fallback to Windows Personal Store (CurrentUser\My) if PKCS#11 returned nothing
+        if not certs and sys.platform == "win32":
+            logger.info(f"Checking Windows Personal Store fallback for {token_id} certificates...")
+            win_certs = self.get_windows_store_certificates(token_id=token_id)
+            if win_certs:
+                logger.info(f"Retrieved {len(win_certs)} certificate(s) from Windows Personal Store.")
+                certs = win_certs
+
+        self._cached_certs = certs
+        return certs
+
+    def get_windows_store_certificates(self, token_id: Optional[str] = None) -> List[ParsedCertificate]:
+        """
+        Extracts genuine DSC certificates from Windows Personal Store (CurrentUser\\My).
+        Acts as a reliable, zero-hang fallback when vendor PKCS#11 middleware is locked or unaligned.
+        """
+        if sys.platform != "win32":
             return []
 
-        import PyKCS11
-        from PyKCS11 import CKO_CERTIFICATE, CKA_CLASS, CKA_VALUE, CKA_LABEL, CKA_ID
+        import ctypes
+        from ctypes import wintypes
+
+        class CERT_CONTEXT(ctypes.Structure):
+            _fields_ = [
+                ("dwCertEncodingType", wintypes.DWORD),
+                ("pbCertEncoded", ctypes.c_void_p),
+                ("cbCertEncoded", wintypes.DWORD),
+                ("pCertInfo", ctypes.c_void_p),
+                ("hCertStore", wintypes.HANDLE),
+            ]
 
         certs: List[ParsedCertificate] = []
         try:
-            lib = self.pkcs11_mgr.get_pkcs11_lib(token_id)
+            crypt32 = ctypes.windll.crypt32
+            crypt32.CertOpenSystemStoreW.restype = wintypes.HANDLE
+            crypt32.CertOpenSystemStoreW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR]
+            crypt32.CertEnumCertificatesInStore.restype = ctypes.POINTER(CERT_CONTEXT)
+            crypt32.CertEnumCertificatesInStore.argtypes = [wintypes.HANDLE, ctypes.POINTER(CERT_CONTEXT)]
+            crypt32.CertCloseStore.restype = wintypes.BOOL
+            crypt32.CertCloseStore.argtypes = [wintypes.HANDLE, wintypes.DWORD]
 
-            # Auto-resolve active slot(s)
-            slots_to_check = []
-            if slot is not None:
-                slots_to_check = [slot]
-            else:
-                if hasattr(self.pkcs11_mgr, "get_slots_with_token"):
-                    active_slots = self.pkcs11_mgr.get_slots_with_token(token_id)
-                    if active_slots:
-                        slots_to_check = list(active_slots)
+            hStore = crypt32.CertOpenSystemStoreW(None, "MY")
+            if not hStore:
+                return []
 
-                if not slots_to_check:
+            pCert = crypt32.CertEnumCertificatesInStore(hStore, None)
+            while pCert:
+                ctx = pCert.contents
+                if ctx.pbCertEncoded and ctx.cbCertEncoded > 0:
+                    der = ctypes.string_at(ctx.pbCertEncoded, ctx.cbCertEncoded)
                     try:
-                        present_slots = lib.getSlotList(tokenPresent=True)
-                        if present_slots:
-                            slots_to_check = list(present_slots)
-                        else:
-                            all_slots = lib.getSlotList(tokenPresent=False)
-                            slots_to_check = list(all_slots) if all_slots else [0]
+                        parsed = ParsedCertificate(cert_der=der, token_id=token_id or "WIN_STORE")
+                        # Filter to only valid Indian CCA / DSC subscriber certificates
+                        issuer_text = (parsed.issuer_cn + " " + parsed.issuer_o).lower()
+                        is_indian_dsc = any(ca.lower() in issuer_text for ca in INDIAN_CAS)
+                        if is_indian_dsc and not any(c.fingerprint_sha256 == parsed.fingerprint_sha256 for c in certs):
+                            certs.append(parsed)
                     except Exception:
-                        slots_to_check = [0]
-
-            for s in slots_to_check:
-                try:
-                    session = lib.openSession(s, PyKCS11.CKF_SERIAL_SESSION)
-                except Exception as ex:
-                    logger.debug(f"Could not open session on slot {s} of {token_id}: {ex}")
-                    continue
-
-                try:
-                    # Query all certificate objects
-                    objects = session.findObjects([(CKA_CLASS, CKO_CERTIFICATE)])
-                    for obj in objects:
-                        try:
-                            attrs = session.getAttributeValue(obj, [CKA_VALUE, CKA_LABEL, CKA_ID])
-                            raw_val, raw_label, raw_id = attrs[0], attrs[1], attrs[2]
-
-                            # CKA_VALUE -> bytes
-                            if isinstance(raw_val, (tuple, list)):
-                                val = bytes(raw_val)
-                            elif isinstance(raw_val, str):
-                                val = raw_val.encode("latin-1")
-                            else:
-                                val = bytes(raw_val) if raw_val else b""
-
-                            # CKA_LABEL -> str
-                            if isinstance(raw_label, str):
-                                label = raw_label.strip()
-                            elif isinstance(raw_label, (tuple, list)):
-                                label = "".join(chr(c) for c in raw_label if 32 <= c <= 126).strip()
-                            else:
-                                label = str(raw_label).strip() if raw_label else "DSC Certificate"
-
-                            # CKA_ID -> bytes
-                            if isinstance(raw_id, (tuple, list)):
-                                ck_id = bytes(raw_id)
-                            elif isinstance(raw_id, str):
-                                ck_id = raw_id.encode("latin-1")
-                            else:
-                                ck_id = bytes(raw_id) if raw_id else b""
-
-                            if val:
-                                parsed = ParsedCertificate(
-                                    cert_der=val,
-                                    label=label or "DSC Certificate",
-                                    token_id=token_id,
-                                    ck_id=ck_id,
-                                )
-                                # Avoid duplicates by fingerprint
-                                if not any(c.fingerprint_sha256 == parsed.fingerprint_sha256 for c in certs):
-                                    certs.append(parsed)
-                        except Exception as e:
-                            logger.warning(f"Error parsing cert object: {e}")
-                finally:
-                    session.closeSession()
+                        pass
+                pCert = crypt32.CertEnumCertificatesInStore(hStore, pCert)
+            crypt32.CertCloseStore(hStore, 0)
         except Exception as e:
-            logger.error(f"Failed to extract certificates from {token_id}: {e}")
+            logger.warning(f"Error enumerating Windows Personal Store certificates: {e}")
 
-        self._cached_certs = certs
         return certs
 
     @staticmethod

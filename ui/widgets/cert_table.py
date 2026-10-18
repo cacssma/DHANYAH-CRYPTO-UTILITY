@@ -39,7 +39,7 @@ class CertTableWidget(QFrame):
         # Header Row
         header_row = QHBoxLayout()
         lbl_head = QLabel("INSTALLED DIGITAL SIGNATURE CERTIFICATES (DSC)")
-        lbl_head.setStyleSheet("font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 1px;")
+        lbl_head.setProperty("class", "CardTitle")
         header_row.addWidget(lbl_head)
 
         header_row.addStretch()
@@ -80,7 +80,7 @@ class CertTableWidget(QFrame):
         # Empty status placeholder
         self.lbl_empty = QLabel("No certificates available. Insert a crypto token or switch to Demo mode.")
         self.lbl_empty.setAlignment(Qt.AlignCenter)
-        self.lbl_empty.setStyleSheet("color: #64748b; font-size: 13px; padding: 24px;")
+        self.lbl_empty.setProperty("class", "EmptyPlaceholder")
         layout.addWidget(self.lbl_empty)
 
     def set_certificates(self, certs: List[ParsedCertificate]):

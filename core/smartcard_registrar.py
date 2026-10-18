@@ -13,6 +13,8 @@ import sys
 import winreg
 from typing import Dict, Tuple, Any, Optional
 
+from core.constants import run_silent_cmd
+
 logger = logging.getLogger("DhanyahCrypto.Registrar")
 
 SMARTCARD_REG_ROOTS = [
@@ -144,9 +146,9 @@ CARD_DEFINITIONS = {
         "crypto_provider": "PROXKey CSP India V2.0",
         "ksp": "Microsoft Smart Card Key Storage Provider",
         "csp_name": "PROXKey CSP India V2.0",
-        "csp_image": r"C:\Windows\system32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-        "csp_image_64": r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-        "csp_image_32": r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+        "csp_image": r"C:\Windows\system32\Watchdata\PROXKey CSP India V2.0\wdsafe3.dll",
+        "csp_image_64": r"C:\Windows\System32\Watchdata\PROXKey CSP India V2.0\wdsafe3.dll",
+        "csp_image_32": r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V2.0\wdsafe3.dll",
         "csp_type": 1,
     },
     "proxkey_v1": {
@@ -264,12 +266,7 @@ class SmartCardRegistrar:
         # Check Windows Services
         for svc_name in ["CertPropSvc", "SCardSvr"]:
             try:
-                res = subprocess.run(
-                    ["sc", "query", svc_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=2,
-                )
+                res = run_silent_cmd(["sc", "query", svc_name], timeout=2.0)
                 if "RUNNING" in res.stdout:
                     status["services"][svc_name] = True
             except Exception:
@@ -285,12 +282,7 @@ class SmartCardRegistrar:
         """
         try:
             logger.info("Pulsing Windows Certificate Propagation Service (certutil -user -pulse)...")
-            res = subprocess.run(
-                ["certutil", "-user", "-pulse"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
+            res = run_silent_cmd(["certutil", "-user", "-pulse"], timeout=5.0)
             return res.returncode == 0
         except Exception as e:
             logger.warning(f"Failed to pulse certificates via certutil: {e}")
@@ -436,28 +428,38 @@ class SmartCardRegistrar:
             # ProxKey files
             prox_src = os.path.join(drivers_source_dir, "proxkey")
             if os.path.isdir(prox_src):
-                prox_dest = os.path.join(system32, "Watchdata", "PROXKey CSP India V3.0")
-                os.makedirs(prox_dest, exist_ok=True)
-                for f in os.listdir(prox_src):
+                # 1. Populate both V3.0 and V2.0 directories in System32 (64-bit)
+                for ver_name in ["PROXKey CSP India V3.0", "PROXKey CSP India V2.0"]:
+                    prox_dest = os.path.join(system32, "Watchdata", ver_name)
+                    os.makedirs(prox_dest, exist_ok=True)
+                    for f in os.listdir(prox_src):
+                        fp = os.path.join(prox_src, f)
+                        if os.path.isfile(fp):
+                            _safe_copy(fp, os.path.join(prox_dest, f))
+
+                # Direct companion DLLs in System32 for 64-bit apps & system loaders
+                for f in ["WDPKCS.dll", "TokenMgr.dll", "WDAlg.dll", "WDCtr.dll", "wdcsp03.dll", "wdsafe3.dll", "hodll.dll", "wdkmgr.dll"]:
                     fp = os.path.join(prox_src, f)
                     if os.path.isfile(fp):
-                        _safe_copy(fp, os.path.join(prox_dest, f))
-                # Direct WDPKCS.dll in System32 for 64-bit apps
-                if os.path.isfile(os.path.join(prox_src, "WDPKCS.dll")):
-                    _safe_copy(os.path.join(prox_src, "WDPKCS.dll"), os.path.join(system32, "WDPKCS.dll"))
+                        _safe_copy(fp, os.path.join(system32, f))
 
                 if has_wow64:
-                    prox_dest_32 = os.path.join(syswow64, "Watchdata", "PROXKey CSP India V3.0")
-                    os.makedirs(prox_dest_32, exist_ok=True)
                     prox_src_32 = os.path.join(prox_src, "x86")
                     src_dir_32 = prox_src_32 if os.path.isdir(prox_src_32) else prox_src
-                    for f in os.listdir(src_dir_32):
+                    # Populate both V3.0 and V2.0 directories in SysWOW64 (32-bit)
+                    for ver_name in ["PROXKey CSP India V3.0", "PROXKey CSP India V2.0"]:
+                        prox_dest_32 = os.path.join(syswow64, "Watchdata", ver_name)
+                        os.makedirs(prox_dest_32, exist_ok=True)
+                        for f in os.listdir(src_dir_32):
+                            fp = os.path.join(src_dir_32, f)
+                            if os.path.isfile(fp):
+                                _safe_copy(fp, os.path.join(prox_dest_32, f))
+
+                    # Direct companion DLLs in SysWOW64 for 32-bit emBridge, emSigner, and legacy SP_CertMND
+                    for f in ["WDPKCS.dll", "TokenMgr.dll", "WDAlg.dll", "WDCtr.dll", "wdcsp03.dll", "wdsafe3.dll", "hodll.dll"]:
                         fp = os.path.join(src_dir_32, f)
                         if os.path.isfile(fp):
-                            _safe_copy(fp, os.path.join(prox_dest_32, f))
-                    # Direct 32-bit WDPKCS.dll in SysWOW64 for 32-bit emBridge and emSigner
-                    if os.path.isfile(os.path.join(src_dir_32, "WDPKCS.dll")):
-                        _safe_copy(os.path.join(src_dir_32, "WDPKCS.dll"), os.path.join(syswow64, "WDPKCS.dll"))
+                            _safe_copy(fp, os.path.join(syswow64, f))
 
             # InnaIT files (64-bit only)
             innait_src = os.path.join(drivers_source_dir, "innait")
@@ -509,15 +511,32 @@ class SmartCardRegistrar:
                         except Exception as e:
                             logger.warning(f"Error registering CSP provider key {key_path}: {e}")
 
-            # 4. Start / Enable Services
+            # 4. Clean up broken/obsolete legacy Watchdata autorun keys that trigger Tokenmgr.dll error at PC boot
+            for run_root in [
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+            ]:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, run_root, 0, winreg.KEY_ALL_ACCESS) as rk:
+                        for bad_entry in ["WD_Stdcertm", "WD_SPSocketServer"]:
+                            try:
+                                winreg.QueryValueEx(rk, bad_entry)
+                                winreg.DeleteValue(rk, bad_entry)
+                                logger.info(f"Removed broken legacy autorun key: {run_root}\\{bad_entry}")
+                            except FileNotFoundError:
+                                pass
+                except Exception as ex_run:
+                    logger.debug(f"Could not access {run_root}: {ex_run}")
+
+            # 5. Start / Enable Services
             for svc in ["SCardSvr", "CertPropSvc"]:
                 try:
-                    subprocess.run(["sc", "config", svc, "start=", "auto"], capture_output=True, timeout=2)
-                    subprocess.run(["sc", "start", svc], capture_output=True, timeout=2)
+                    run_silent_cmd(["sc", "config", svc, "start=", "auto"], timeout=3.0)
+                    run_silent_cmd(["net", "start", svc], timeout=4.0)
                 except Exception:
                     pass
 
-            # 5. Pulse Certificate Propagation
+            # 6. Pulse Certificate Propagation
             SmartCardRegistrar.pulse_windows_certificates()
 
             logger.info("Successfully registered Windows Smart Card subsystem for all 4 tokens.")

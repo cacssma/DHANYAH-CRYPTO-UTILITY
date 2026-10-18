@@ -7,10 +7,12 @@ Specialized for Indian FIPS 140-2/3 Level 3 Crypto USB Tokens:
 - Precision InnaITKey
 """
 
-from typing import Dict, List, Any
+import sys
+import subprocess
+from typing import Dict, List, Any, Optional
 
 # Application Version
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.1.0"
 
 # Loopback HTTP / WebSocket default configuration
 DEFAULT_LOOPBACK_PORT = 18200
@@ -143,9 +145,14 @@ TOKEN_PROFILES: Dict[str, Dict[str, Any]] = {
         "default_pin_length": (4, 16),
         "default_user_pin": "12345678",
         "atrs": [
+            "3B6D000057443641018693000000000000",  # Standard ProxKey WD6A full ATR
+            "3B6D000057443641",                      # Standard ProxKey WD6A prefix
+            "3B6D00005744",                          # Watchdata WD prefix
+            "3B6D",
             "3B6E000080318066B08412016E0183009000",
             "3B6E000080318066B08412016E",
             "3B6E000080318066",
+            "3B6E",
             "3B7F1800000031C0739E010B",
             "3B169420020100000D0D",
         ],
@@ -156,28 +163,36 @@ TOKEN_PROFILES: Dict[str, Dict[str, Any]] = {
             ("163c", "0810"),
             ("2ccf", "080a"),  # Common Indian CCID repackaging
         ],
-        "reader_name_keywords": ["proxkey", "watchdata", "wd", "prox", "wdprox"],
+        "reader_name_keywords": ["proxkey", "watchdata", "wdind", "wd", "prox", "wdprox"],
         "registry_csp": [
             "PROXKey CSP India V3.0",
+            "PROXKey CSP India V2.0",
+            "PROXKey CSP India V1.0",
             "Watchdata CSP v1.0",
         ],
         "dll_names_64": [
             r"Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+            r"Watchdata\PROXKey CSP India V2.0\WDPKCS.dll",
             "WDPKCS.dll",
             "SignatureP11.dll",
             "wdsafe3.dll",
+            "TokenMgr.dll",
         ],
         "dll_names_32": [
             r"Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+            r"Watchdata\PROXKey CSP India V2.0\WDPKCS.dll",
             "WDPKCS.dll",
             "SignatureP11.dll",
             "wdsafe3.dll",
+            "TokenMgr.dll",
         ],
         "install_paths": [
             r"C:\Program Files (x86)\Watchdata\WD PROXKey",
             r"C:\Program Files\Watchdata\WD PROXKey",
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0",
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V2.0",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V2.0",
         ],
     },
     TOKEN_INNAIT: {
@@ -297,3 +312,31 @@ PKCS11_ERRORS = {
     0x00000190: ("CKR_MECHANISM_INVALID", "Requested cryptographic mechanism is not supported by token hardware."),
     0x00000191: ("CKR_MECHANISM_PARAM_INVALID", "Invalid parameter for mechanism."),
 }
+
+
+def get_silent_subprocess_kwargs() -> Dict[str, Any]:
+    """
+    Returns creationflags and startupinfo to ensure NO black command prompt / conhost
+    window ever flashes on screen during background checks on Windows.
+    """
+    kwargs: Dict[str, Any] = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        kwargs["startupinfo"] = si
+    return kwargs
+
+
+def run_silent_cmd(cmd: List[str], timeout: float = 5.0) -> subprocess.CompletedProcess:
+    """Safely and silently executes a system command with CREATE_NO_WINDOW and SW_HIDE."""
+    kwargs = get_silent_subprocess_kwargs()
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **kwargs,
+    )
+

@@ -37,6 +37,7 @@ from server.loopback_server import (
     stop_embridge_service,
     start_embridge_service,
 )
+from ui.styles import get_log_console_style
 
 
 class ServerWidget(QWidget):
@@ -45,13 +46,14 @@ class ServerWidget(QWidget):
     def __init__(self, server: LoopbackServer, parent=None):
         super().__init__(parent)
         self.server = server
+        self._is_dark_mode = True
         self._init_ui()
         # Connect log callback
         self.server.log_callback = self._on_server_log
 
-        # Auto refresh table periodically (every 5 seconds)
+        # Auto refresh table periodically (every 5 seconds, lightweight without conflict checks)
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self._refresh_ports_table)
+        self._refresh_timer.timeout.connect(lambda: self._refresh_ports_table(check_conflicts=False))
         self._refresh_timer.start(5000)
 
     def _init_ui(self):
@@ -81,7 +83,7 @@ class ServerWidget(QWidget):
 
         top_row = QHBoxLayout()
         lbl_head = QLabel("LOCAL HTTP / HTTPS LOOPBACK GATEWAY")
-        lbl_head.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_head.setProperty("class", "SectionTitle")
         top_row.addWidget(lbl_head)
         top_row.addStretch()
 
@@ -102,7 +104,7 @@ class ServerWidget(QWidget):
             "Web portals trigger hardware cryptographic signing through these local endpoints."
         )
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
+        lbl_desc.setProperty("class", "SubText")
         c_layout.addWidget(lbl_desc)
 
         layout.addWidget(ctrl_card)
@@ -118,12 +120,12 @@ class ServerWidget(QWidget):
 
         p_header = QHBoxLayout()
         lbl_ports_title = QLabel("GOVERNMENT PORTALS & CONFIGURED PORTS")
-        lbl_ports_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #ffffff;")
+        lbl_ports_title.setProperty("class", "SectionTitle")
         p_header.addWidget(lbl_ports_title)
         p_header.addStretch()
 
         btn_refresh_ports = QPushButton("🔄 Refresh Port Statuses")
-        btn_refresh_ports.clicked.connect(self._refresh_ports_table)
+        btn_refresh_ports.clicked.connect(lambda: self._refresh_ports_table(check_conflicts=True))
         p_header.addWidget(btn_refresh_ports)
 
         p_layout.addLayout(p_header)
@@ -159,7 +161,7 @@ class ServerWidget(QWidget):
         ab_layout.setSpacing(10)
 
         lbl_add_title = QLabel("➕ Add Custom Port for Other Government Portal or ERP")
-        lbl_add_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #38bdf8;")
+        lbl_add_title.setProperty("class", "CardTitle")
         ab_layout.addWidget(lbl_add_title)
 
         form_row = QHBoxLayout()
@@ -230,7 +232,7 @@ class ServerWidget(QWidget):
 
         log_head = QHBoxLayout()
         lbl_log_title = QLabel("LIVE REQUEST STREAM & GATEWAY LOGS")
-        lbl_log_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #94a3b8;")
+        lbl_log_title.setProperty("class", "CardTitle")
         log_head.addWidget(lbl_log_title)
         log_head.addStretch()
 
@@ -248,9 +250,7 @@ class ServerWidget(QWidget):
 
         self.text_logs = QPlainTextEdit()
         self.text_logs.setReadOnly(True)
-        self.text_logs.setStyleSheet(
-            "font-family: monospace; font-size: 11px; background-color: #0b1120; color: #e2e8f0; border-radius: 6px;"
-        )
+        self.text_logs.setStyleSheet(get_log_console_style(self._is_dark_mode))
         self.text_logs.setMinimumHeight(150)
         self.text_logs.appendPlainText(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Gateway service ready.")
         l_layout.addWidget(self.text_logs)
@@ -267,9 +267,9 @@ class ServerWidget(QWidget):
         """Alias for refreshing ports table."""
         self._refresh_ports_table()
 
-    def _refresh_ports_table(self):
+    def _refresh_ports_table(self, check_conflicts: bool = False):
         """Populates ports table with real-time status and action buttons."""
-        overview = self.server.get_port_overview(check_conflicts=True)
+        overview = self.server.get_port_overview(check_conflicts=check_conflicts)
         self.table_ports.setRowCount(len(overview))
 
         active_count = 0
@@ -288,7 +288,6 @@ class ServerWidget(QWidget):
             # Col 0: Port
             item_port = QTableWidgetItem(str(port))
             item_port.setTextAlignment(Qt.AlignCenter)
-            item_port.setForeground(Qt.white)
             self.table_ports.setItem(row, 0, item_port)
 
             # Col 1: Protocol Badge
@@ -296,23 +295,17 @@ class ServerWidget(QWidget):
             l_proto = QHBoxLayout(w_proto)
             l_proto.setContentsMargins(4, 2, 4, 2)
             lbl_proto = QLabel(protocol)
+            lbl_proto.setAlignment(Qt.AlignCenter)
             if protocol == "HTTPS":
-                lbl_proto.setStyleSheet(
-                    "background-color: #064e3b; color: #34d399; border: 1px solid #059669; "
-                    "border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 11px;"
-                )
+                lbl_proto.setProperty("class", "BadgeValid")
             else:
-                lbl_proto.setStyleSheet(
-                    "background-color: #1e3a8a; color: #93c5fd; border: 1px solid #2563eb; "
-                    "border-radius: 4px; padding: 2px 6px; font-weight: 700; font-size: 11px;"
-                )
+                lbl_proto.setProperty("class", "BadgeInfo")
             l_proto.addWidget(lbl_proto)
             l_proto.setAlignment(Qt.AlignCenter)
             self.table_ports.setCellWidget(row, 1, w_proto)
 
             # Col 2: Portal / Service Name
             item_name = QTableWidgetItem(f"{name}")
-            item_name.setForeground(Qt.white)
             self.table_ports.setItem(row, 2, item_name)
 
             # Col 3: Status Badge
@@ -320,41 +313,27 @@ class ServerWidget(QWidget):
             l_status = QHBoxLayout(w_status)
             l_status.setContentsMargins(4, 2, 4, 2)
             lbl_status = QLabel()
+            lbl_status.setAlignment(Qt.AlignCenter)
 
             is_embridge_active = item.get("embridge_active", False)
 
             if is_active:
                 lbl_status.setText("● ACTIVE (Dhanyah)")
-                lbl_status.setStyleSheet(
-                    "background-color: #064e3b; color: #34d399; border: 1px solid #059669; "
-                    "border-radius: 4px; padding: 2px 8px; font-weight: 600; font-size: 11px;"
-                )
+                lbl_status.setProperty("class", "BadgeValid")
             elif is_embridge_active:
                 lbl_status.setText("● OFFICIAL emBridge (Coexisting)")
-                lbl_status.setStyleSheet(
-                    "background-color: #0c4a6e; color: #38bdf8; border: 1px solid #0284c7; "
-                    "border-radius: 4px; padding: 2px 8px; font-weight: 600; font-size: 11px;"
-                )
+                lbl_status.setProperty("class", "BadgeInfo")
             elif conflict:
                 proc_name = conflict.get("process", "Process")
                 proc_pid = conflict.get("pid", "?")
                 lbl_status.setText(f"● CONFLICT: {proc_name} (PID {proc_pid})")
-                lbl_status.setStyleSheet(
-                    "background-color: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; "
-                    "border-radius: 4px; padding: 2px 8px; font-weight: 600; font-size: 11px;"
-                )
+                lbl_status.setProperty("class", "BadgeExpired")
             elif not enabled:
                 lbl_status.setText("○ DISABLED")
-                lbl_status.setStyleSheet(
-                    "background-color: #334155; color: #94a3b8; border: 1px solid #475569; "
-                    "border-radius: 4px; padding: 2px 8px; font-size: 11px;"
-                )
+                lbl_status.setProperty("class", "BadgeWarning")
             else:
                 lbl_status.setText("○ STOPPED")
-                lbl_status.setStyleSheet(
-                    "background-color: #334155; color: #cbd5e1; border: 1px solid #475569; "
-                    "border-radius: 4px; padding: 2px 8px; font-size: 11px;"
-                )
+                lbl_status.setProperty("class", "BadgeWarning")
             l_status.addWidget(lbl_status)
             self.table_ports.setCellWidget(row, 3, w_status)
 
@@ -374,7 +353,7 @@ class ServerWidget(QWidget):
             if is_embridge_active:
                 btn_coexist = QPushButton("✓ Coexisting")
                 btn_coexist.setEnabled(False)
-                btn_coexist.setStyleSheet("color: #38bdf8; font-size: 11px; padding: 2px 6px;")
+                btn_coexist.setProperty("class", "BadgeInfo")
                 btn_coexist.setToolTip("Official emBridge is handling this port smoothly without clash.")
                 l_acts.addWidget(btn_coexist)
             else:
@@ -571,3 +550,10 @@ class ServerWidget(QWidget):
                 else:
                     self._log_local(f"Could not start emBridge: {msg}")
                     QMessageBox.warning(self, "Start Error", f"Could not start emBridge service:\n{msg}")
+
+    def apply_theme(self, is_dark_mode: bool):
+        """Update live console and table styling on theme toggle."""
+        self._is_dark_mode = is_dark_mode
+        self.text_logs.setStyleSheet(get_log_console_style(is_dark_mode))
+        self._refresh_ports_table(check_conflicts=False)
+

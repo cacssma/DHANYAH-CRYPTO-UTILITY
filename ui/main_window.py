@@ -3,6 +3,7 @@ Dhanyah Crypto Utility - Unified Desktop Application Main Window
 """
 
 import logging
+from typing import Optional, List, Dict, Any
 from PySide6.QtCore import Qt, Signal, QObject, Slot
 from PySide6.QtGui import (
     QIcon,
@@ -38,6 +39,7 @@ from core.cert_manager import CertManager, ParsedCertificate
 from core.pin_manager import PinManager
 from core.signer import TokenSigner
 from core.smartcard_registrar import SmartCardRegistrar
+from core.lan_mesh import LanMeshManager, LanPeer, LanCertificateInfo
 from server.loopback_server import LoopbackServer
 
 from ui.styles import DARK_THEME_QSS, LIGHT_THEME_QSS
@@ -45,6 +47,7 @@ from ui.widgets.token_banner import TokenBannerWidget
 from ui.widgets.cert_table import CertTableWidget
 from ui.widgets.pin_dialog import PinManagementWidget
 from ui.widgets.pdf_signer_widget import PdfSignerWidget
+from ui.widgets.lan_mesh_widget import LanMeshWidget
 from ui.widgets.server_widget import ServerWidget
 from ui.widgets.driver_widget import DriverWidget
 
@@ -103,6 +106,7 @@ class MainWindow(QMainWindow):
         pin_mgr: PinManager,
         signer: TokenSigner,
         server: LoopbackServer,
+        mesh_mgr: Optional[LanMeshManager] = None,
     ):
         super().__init__()
         self.detector = detector
@@ -111,6 +115,18 @@ class MainWindow(QMainWindow):
         self.pin_mgr = pin_mgr
         self.signer = signer
         self.server = server
+        self.mesh_mgr = mesh_mgr or LanMeshManager(local_port=server.port)
+
+        # Connect mesh manager with loopback server and signer for remote proxying
+        self.server.lan_mesh_mgr = self.mesh_mgr
+        self.signer.lan_mesh_mgr = self.mesh_mgr
+
+        # Provider callbacks to publish local hardware tokens and certificates to LAN
+        self.mesh_mgr.get_local_token_fn = self.detector.get_primary_token
+        self.mesh_mgr.get_local_certs_fn = lambda: getattr(self, "cert_table", None) and self.cert_table.certificates or []
+
+        # Start LAN discovery and broadcast
+        self.mesh_mgr.start()
 
         self.bridge = EventBridge()
         self.bridge.token_inserted_signal.connect(self._on_token_inserted_ui)
@@ -131,6 +147,8 @@ class MainWindow(QMainWindow):
         self._tray_minimized_notified = False
 
         self._init_ui()
+        self.banner.apply_theme(self.is_dark_mode)
+        self.server_widget.apply_theme(self.is_dark_mode)
         self._init_system_tray()
         self._check_initial_state()
 
@@ -150,9 +168,9 @@ class MainWindow(QMainWindow):
         # Brand Title & Logo
         title_box = QVBoxLayout()
         lbl_app_name = QLabel("DHANYAH CRYPTO UTILITY")
-        lbl_app_name.setStyleSheet("font-size: 17px; font-weight: 800; color: #ffffff; letter-spacing: 1.5px;")
+        lbl_app_name.setProperty("class", "HeaderTitle")
         lbl_subtitle = QLabel("Unified FIPS 140-2/3 Level 3 Token Management & Cryptographic Signing Suite")
-        lbl_subtitle.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        lbl_subtitle.setProperty("class", "SubText")
         title_box.addWidget(lbl_app_name)
         title_box.addWidget(lbl_subtitle)
         h_layout.addLayout(title_box)
@@ -204,6 +222,7 @@ class MainWindow(QMainWindow):
             ("📜  DSC Certificates", "Inspect installed X.509 certificates & CCA fields"),
             ("🔑  PIN Management", "Verify PIN & safe C_SetPIN change utility"),
             ("✍️  PDF Document Signer", "Standalone PAdES digital signing with token"),
+            ("🌐  Network DSC Mesh", "Discover & share tokens across local network PCs"),
             ("🌐  Loopback Gateway", "Localhost REST API :18200 for web portals"),
             ("⚙️  Driver Subsystem", "Dynamic PKCS#11 discovery & library health"),
         ]
@@ -244,11 +263,17 @@ class MainWindow(QMainWindow):
         self.signer_widget = PdfSignerWidget(self.signer)
         self.stack.addWidget(self.signer_widget)
 
-        # View 4: Loopback Gateway
+        # View 4: Network DSC Mesh
+        self.mesh_widget = LanMeshWidget(self.mesh_mgr)
+        self.mesh_widget.remote_token_mounted.connect(self._on_remote_token_mounted)
+        self.mesh_widget.remote_token_unmounted.connect(self._on_remote_token_unmounted)
+        self.stack.addWidget(self.mesh_widget)
+
+        # View 5: Loopback Gateway
         self.server_widget = ServerWidget(self.server)
         self.stack.addWidget(self.server_widget)
 
-        # View 5: Driver Subsystem
+        # View 6: Driver Subsystem
         self.driver_widget = DriverWidget(self.pkcs11_mgr)
         self.stack.addWidget(self.driver_widget)
 
@@ -261,7 +286,8 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Smart Card Subsystem Active | Auto-Detection Polling...")
 
         lbl_contact = QLabel("Author: CA Akash J. Bhayani | Website: CA-AKASH.IN | mail@ca-akash.in")
-        lbl_contact.setStyleSheet("color: #718096; font-size: 11px; padding-right: 10px;")
+        lbl_contact.setProperty("class", "SubText")
+        lbl_contact.setStyleSheet("padding-right: 10px;")
         self.status_bar.addPermanentWidget(lbl_contact)
 
         # Select first nav item
@@ -279,6 +305,11 @@ class MainWindow(QMainWindow):
         else:
             self.setStyleSheet(LIGHT_THEME_QSS)
             self.btn_theme.setText("🌙 Dark Mode")
+
+        if hasattr(self, "banner"):
+            self.banner.apply_theme(self.is_dark_mode)
+        if hasattr(self, "server_widget"):
+            self.server_widget.apply_theme(self.is_dark_mode)
 
     def _on_simulation_changed(self, token_id: str):
         """Triggered when user toggles simulation mode from banner dropdown."""
@@ -300,6 +331,14 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _on_token_inserted_ui(self, token: DetectedToken):
         logger.info(f"UI handling token inserted: {token}")
+
+        # If a virtual remote token was mounted, detach it so physical hardware takes precedence
+        if self.mesh_mgr and self.mesh_mgr.mounted_peer:
+            logger.info("Physical token inserted; detaching remote virtual token.")
+            self.mesh_mgr.unmount_remote_peer()
+            if hasattr(self, "mesh_widget"):
+                self.mesh_widget._update_mount_banner()
+                self.mesh_widget._render_peer_cards(self.mesh_mgr.get_peers())
 
         # Determine driver path
         driver_status = self.pkcs11_mgr.get_driver_status(token.token_id)
@@ -364,6 +403,12 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _on_token_removed_ui(self, reader_name: str):
         logger.info(f"UI handling token removed from {reader_name}")
+
+        # If a remote virtual token is currently mounted, do not clear UI on empty PC/SC slot
+        if self.mesh_mgr and self.mesh_mgr.mounted_peer:
+            logger.info("Token removed event ignored because a remote virtual token is actively mounted.")
+            return
+
         self.banner.update_token(None)
         self.dash_cert_table.set_certificates([])
         self.cert_table.set_certificates([])
@@ -381,6 +426,64 @@ class MainWindow(QMainWindow):
                 QSystemTrayIcon.Warning,
                 2000,
             )
+
+    def _on_remote_token_mounted(self, peer: LanPeer, cert: Optional[LanCertificateInfo]):
+        """Triggered when user mounts a remote workstation's token as active virtual token."""
+        logger.info(f"UI mounting remote token from {peer.display_name}")
+        virtual_token = DetectedToken(
+            token_id="REMOTE_LAN",
+            name=f"{peer.token_name} ({peer.hostname})",
+            vendor=f"LAN Virtual ({peer.ip})",
+            reader_name=f"LAN Virtual ({peer.ip}:{peer.port})",
+            atr=f"LAN_PEER_ID:{peer.peer_id}",
+            fips_level="FIPS 140-2/3 L3 (Remote Network)",
+            is_simulated=False,
+        )
+        self.banner.update_token(virtual_token, f"Network DSC Mesh Proxy ({peer.ip}:{peer.port})")
+
+        # Build parsed certificates from remote peer
+        parsed_certs = []
+        if peer.certificates:
+            parsed_certs = [c.to_parsed_certificate() for c in peer.certificates]
+        elif cert:
+            parsed_certs = [cert.to_parsed_certificate()]
+
+        self.dash_cert_table.set_certificates(parsed_certs)
+        self.cert_table.set_certificates(parsed_certs)
+
+        # Update PIN context
+        self.pin_widget.set_token_context(
+            token_id="REMOTE_LAN",
+            slot=0,
+            is_simulated=False,
+        )
+
+        # Update Signer context
+        self.signer_widget.set_token_context(
+            token_id="REMOTE_LAN",
+            slot=0,
+            certs=parsed_certs,
+            is_simulated=False,
+        )
+
+        signer_name = cert.common_name if cert else peer.token_name
+        status_text = f"🌐 Active Virtual Token: {peer.token_name} on {peer.display_name} (Signer: {signer_name})"
+        self.status_bar.showMessage(status_text)
+
+        if self.tray_icon:
+            self.tray_token_action.setText(f"Virtual: {signer_name} ({peer.hostname})")
+            self.tray_icon.setToolTip(f"Dhanyah Crypto Utility - Remote Token: {signer_name}")
+            self.tray_icon.showMessage(
+                "Remote Virtual Token Mounted",
+                f"Signer: {signer_name}\nHost: {peer.display_name}\nReady for PDF signing & Government web portals.",
+                QSystemTrayIcon.Information,
+                2500,
+            )
+
+    def _on_remote_token_unmounted(self):
+        """Triggered when remote token is detached."""
+        logger.info("UI unmounted remote virtual token")
+        self._check_initial_state()
 
     def _init_system_tray(self):
         """Initialize Windows notification system tray icon and context menu."""
@@ -421,8 +524,11 @@ class MainWindow(QMainWindow):
         act_pdf = tray_menu.addAction("✍️  PDF Document Signer")
         act_pdf.triggered.connect(lambda: self._navigate_from_tray(3))
 
+        act_mesh = tray_menu.addAction("🌐  Network DSC Mesh")
+        act_mesh.triggered.connect(lambda: self._navigate_from_tray(4))
+
         act_gw = tray_menu.addAction("🌐  Loopback Gateway")
-        act_gw.triggered.connect(lambda: self._navigate_from_tray(4))
+        act_gw.triggered.connect(lambda: self._navigate_from_tray(5))
 
         tray_menu.addSeparator()
 
@@ -509,6 +615,8 @@ class MainWindow(QMainWindow):
         if self.tray_icon:
             self.tray_icon.hide()
         try:
+            if hasattr(self, "mesh_mgr") and self.mesh_mgr:
+                self.mesh_mgr.stop()
             self.detector.stop()
             self.server.stop()
         except Exception as e:

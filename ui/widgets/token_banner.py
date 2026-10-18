@@ -3,7 +3,7 @@ Dhanyah Crypto Utility - Token Hardware Banner & Monitor Widget
 """
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QClipboard, QGuiApplication
+from PySide6.QtGui import QClipboard, QGuiApplication
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -23,6 +23,7 @@ from core.constants import (
     TOKEN_INNAIT,
 )
 from core.token_detector import DetectedToken
+from ui.styles import get_status_pill_style
 
 
 class TokenBannerWidget(QFrame):
@@ -34,6 +35,7 @@ class TokenBannerWidget(QFrame):
         super().__init__(parent)
         self.setProperty("class", "CardFrame")
         self._current_token: DetectedToken = None
+        self._is_dark_mode = True
         self._init_ui()
 
     def _init_ui(self):
@@ -44,7 +46,7 @@ class TokenBannerWidget(QFrame):
         # Top Header Row: Title, Status Pill & Simulation Mode
         header_row = QHBoxLayout()
         self.lbl_title = QLabel("HARDWARE TOKEN MONITOR")
-        self.lbl_title.setStyleSheet("font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 1px;")
+        self.lbl_title.setProperty("class", "CardTitle")
         header_row.addWidget(self.lbl_title)
 
         header_row.addStretch()
@@ -55,7 +57,7 @@ class TokenBannerWidget(QFrame):
 
         # Simulation Mode selector for quick testing
         lbl_sim = QLabel("Demo/Sim:")
-        lbl_sim.setStyleSheet("color: #94a3b8; font-size: 11px; margin-left: 10px;")
+        lbl_sim.setProperty("class", "FieldLabel")
         header_row.addWidget(lbl_sim)
 
         self.combo_sim = QComboBox()
@@ -76,31 +78,31 @@ class TokenBannerWidget(QFrame):
 
         # Token Name
         lbl_token_title = QLabel("Device:")
-        lbl_token_title.setStyleSheet("color: #64748b; font-weight: 600;")
+        lbl_token_title.setProperty("class", "FieldLabel")
         self.lbl_device_name = QLabel("Waiting for crypto token insertion...")
-        self.lbl_device_name.setStyleSheet("font-size: 16px; font-weight: 700; color: #f8fafc;")
+        self.lbl_device_name.setProperty("class", "DeviceHighlight")
         self.grid.addWidget(lbl_token_title, 0, 0)
         self.grid.addWidget(self.lbl_device_name, 0, 1)
 
         # Reader Name
         lbl_reader_title = QLabel("PC/SC Reader:")
-        lbl_reader_title.setStyleSheet("color: #64748b; font-weight: 600;")
+        lbl_reader_title.setProperty("class", "FieldLabel")
         self.lbl_reader_name = QLabel("None")
-        self.lbl_reader_name.setStyleSheet("color: #cbd5e1; font-family: monospace;")
+        self.lbl_reader_name.setProperty("class", "TechCode")
         self.grid.addWidget(lbl_reader_title, 1, 0)
         self.grid.addWidget(self.lbl_reader_name, 1, 1)
 
         # ATR row with copy button
         lbl_atr_title = QLabel("Smart Card ATR:")
-        lbl_atr_title.setStyleSheet("color: #64748b; font-weight: 600;")
+        lbl_atr_title.setProperty("class", "FieldLabel")
         atr_layout = QHBoxLayout()
         self.lbl_atr = QLabel("None")
-        self.lbl_atr.setStyleSheet("color: #38bdf8; font-family: monospace; font-size: 11px;")
+        self.lbl_atr.setProperty("class", "TechCode")
         atr_layout.addWidget(self.lbl_atr)
 
         self.btn_copy_atr = QPushButton("Copy ATR")
         self.btn_copy_atr.setFixedWidth(80)
-        self.btn_copy_atr.setStyleSheet("font-size: 10px; padding: 3px 6px; height: 16px;")
+        self.btn_copy_atr.setStyleSheet("font-size: 11px; padding: 3px 8px; min-height: 18px;")
         self.btn_copy_atr.clicked.connect(self._copy_atr)
         atr_layout.addWidget(self.btn_copy_atr)
         atr_layout.addStretch()
@@ -110,9 +112,9 @@ class TokenBannerWidget(QFrame):
 
         # Serial & FIPS rating
         lbl_specs_title = QLabel("Specifications:")
-        lbl_specs_title.setStyleSheet("color: #64748b; font-weight: 600;")
+        lbl_specs_title.setProperty("class", "FieldLabel")
         self.lbl_specs = QLabel("Security: FIPS 140-2/3 Level 3 | RSA 2048/4096-bit")
-        self.lbl_specs.setStyleSheet("color: #94a3b8;")
+        self.lbl_specs.setProperty("class", "SubText")
         self.grid.addWidget(lbl_specs_title, 3, 0)
         self.grid.addWidget(self.lbl_specs, 3, 1)
 
@@ -122,21 +124,43 @@ class TokenBannerWidget(QFrame):
         self.driver_banner = QFrame()
         self.driver_banner.setProperty("class", "SubCardFrame")
         db_layout = QHBoxLayout(self.driver_banner)
-        db_layout.setContentsMargins(10, 6, 10, 6)
+        db_layout.setContentsMargins(12, 8, 12, 8)
 
         self.lbl_driver_info = QLabel("Driver: Scanning PKCS#11 subsystem...")
-        self.lbl_driver_info.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self.lbl_driver_info.setProperty("class", "SubText")
         db_layout.addWidget(self.lbl_driver_info)
 
         layout.addWidget(self.driver_banner)
+
+    def apply_theme(self, is_dark_mode: bool):
+        """Update theme state and re-polish dynamic pill styles."""
+        self._is_dark_mode = is_dark_mode
+        self._update_pill_style()
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def _update_pill_style(self):
+        if not self._current_token:
+            self.lbl_status_pill.setStyleSheet("")
+            self.lbl_status_pill.setProperty("class", "BadgeWarning")
+        elif self._current_token.is_simulated:
+            self.lbl_status_pill.setProperty("class", "BadgeInfo")
+            self.lbl_status_pill.setStyleSheet(get_status_pill_style("simulation", self._is_dark_mode))
+        elif getattr(self._current_token, "token_id", "") == "REMOTE_LAN":
+            self.lbl_status_pill.setProperty("class", "BadgeValid")
+            self.lbl_status_pill.setStyleSheet(
+                "background-color: #0284c7; color: #ffffff; border-radius: 4px; padding: 2px 8px; font-weight: bold;"
+            )
+        else:
+            self.lbl_status_pill.setProperty("class", "BadgeValid")
+            self.lbl_status_pill.setStyleSheet(get_status_pill_style("active", self._is_dark_mode))
 
     def update_token(self, token: DetectedToken, driver_path: str = ""):
         """Update display with detected token details."""
         self._current_token = token
         if not token:
             self.lbl_status_pill.setText("NO TOKEN INSERTED")
-            self.lbl_status_pill.setProperty("class", "BadgeWarning")
-            self.lbl_status_pill.setStyleSheet("")
+            self._update_pill_style()
             self.lbl_device_name.setText("Please insert a USB Crypto Token (HYP 2003, mToken, ProxKey, InnaITKey)")
             self.lbl_reader_name.setText("No PC/SC Reader Active")
             self.lbl_atr.setText("N/A")
@@ -145,10 +169,13 @@ class TokenBannerWidget(QFrame):
             return
 
         # Token Connected
-        if token.is_simulated:
+        if getattr(token, "token_id", "") == "REMOTE_LAN":
+            self.lbl_status_pill.setText("🌐 VIRTUAL LAN TOKEN")
+            self._update_pill_style()
+            sim_tag = " [NETWORK DSC MESH]"
+        elif token.is_simulated:
             self.lbl_status_pill.setText("SIMULATION MODE")
-            self.lbl_status_pill.setProperty("class", "BadgeInfo")
-            self.lbl_status_pill.setStyleSheet("background-color: #0284c7; color: #ffffff; padding: 4px 10px; border-radius: 10px; font-weight: bold;")
+            self._update_pill_style()
             sim_tag = " [DEMO SIMULATION]"
         else:
             # Physical Hardware Token
@@ -157,8 +184,7 @@ class TokenBannerWidget(QFrame):
             self.combo_sim.blockSignals(False)
 
             self.lbl_status_pill.setText("● ACTIVE HARDWARE TOKEN")
-            self.lbl_status_pill.setProperty("class", "BadgeValid")
-            self.lbl_status_pill.setStyleSheet("background-color: #16a34a; color: #ffffff; padding: 4px 10px; border-radius: 10px; font-weight: bold;")
+            self._update_pill_style()
             sim_tag = " [PHYSICAL HARDWARE]"
 
         self.lbl_device_name.setText(f"{token.name}{sim_tag}")

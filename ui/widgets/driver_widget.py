@@ -53,7 +53,7 @@ class DriverWidget(QWidget):
 
         wc_top = QHBoxLayout()
         lbl_win_head = QLabel("WINDOWS SYSTEM, ADOBE ACROBAT & BROWSER INTEGRATION")
-        lbl_win_head.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_win_head.setProperty("class", "SectionTitle")
         wc_top.addWidget(lbl_win_head)
         wc_top.addStretch()
 
@@ -73,7 +73,7 @@ class DriverWidget(QWidget):
             "and government portals (MCA, GST, Income Tax, EPFO) automatically recognize all 4 tokens."
         )
         lbl_win_desc.setWordWrap(True)
-        lbl_win_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
+        lbl_win_desc.setProperty("class", "SubText")
         wc_layout.addWidget(lbl_win_desc)
 
         self.win_grid_container = QVBoxLayout()
@@ -93,7 +93,7 @@ class DriverWidget(QWidget):
 
         top_row = QHBoxLayout()
         lbl_head = QLabel("PKCS#11 MIDDLEWARE & PORTABLE DRIVERS")
-        lbl_head.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_head.setProperty("class", "SectionTitle")
         top_row.addWidget(lbl_head)
         top_row.addStretch()
 
@@ -108,7 +108,7 @@ class DriverWidget(QWidget):
             "and bundled portable drivers to auto-load the correct PKCS#11 dynamic library for any connected token."
         )
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl_desc.setProperty("class", "SubText")
         c_layout.addWidget(lbl_desc)
 
         self.driver_container = QVBoxLayout()
@@ -156,7 +156,7 @@ class DriverWidget(QWidget):
             col = (i % 2) * 2
 
             lbl_name = QLabel(f"●  {name}")
-            lbl_name.setStyleSheet("font-size: 12px; color: #f8fafc;")
+            lbl_name.setProperty("class", "FieldLabel")
             grid.addWidget(lbl_name, row, col)
 
             badge = QLabel("ACTIVE & REGISTERED" if is_ok else "NOT CONFIGURED")
@@ -219,7 +219,7 @@ class DriverWidget(QWidget):
             grid.setHorizontalSpacing(12)
 
             lbl_name = QLabel(d.token_name)
-            lbl_name.setStyleSheet("font-size: 13px; font-weight: 700; color: #f8fafc;")
+            lbl_name.setProperty("class", "SectionTitle")
             grid.addWidget(lbl_name, 0, 0)
 
             badge = QLabel("VERIFIED & LOADABLE" if d.is_loadable else ("INSTALLED" if d.is_installed else "MISSING"))
@@ -232,18 +232,18 @@ class DriverWidget(QWidget):
             grid.addWidget(badge, 0, 1, Qt.AlignRight)
 
             lbl_vendor = QLabel(f"Vendor: {d.vendor}  |  Arch: {d.bitness}")
-            lbl_vendor.setStyleSheet("color: #64748b; font-size: 11px;")
+            lbl_vendor.setProperty("class", "SubText")
             grid.addWidget(lbl_vendor, 1, 0, 1, 2)
 
             path_str = d.dll_path or "No compatible DLL found"
             lbl_path = QLabel(f"Path: {path_str}")
-            lbl_path.setStyleSheet("color: #38bdf8; font-family: monospace; font-size: 11px;")
+            lbl_path.setProperty("class", "TechCode")
             lbl_path.setTextInteractionFlags(Qt.TextSelectableByMouse)
             grid.addWidget(lbl_path, 2, 0, 1, 2)
 
             if d.error_message:
                 lbl_msg = QLabel(d.error_message)
-                lbl_msg.setStyleSheet("color: #94a3b8; font-size: 11px;")
+                lbl_msg.setProperty("class", "SubText")
                 grid.addWidget(lbl_msg, 3, 0, 1, 2)
 
             self.driver_container.addWidget(d_card)

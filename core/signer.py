@@ -134,6 +134,20 @@ class TokenSigner:
         if is_simulated or token_id == "SIMULATED":
             return self._sign_hash_simulated(data_hash, algo=algo)
 
+        if token_id == "REMOTE_LAN":
+            if hasattr(self, "lan_mesh_mgr") and self.lan_mesh_mgr and self.lan_mesh_mgr.mounted_peer:
+                peer = self.lan_mesh_mgr.mounted_peer
+                res = self.lan_mesh_mgr.sign_remote_hash(
+                    peer_ip=peer.ip,
+                    peer_port=peer.port,
+                    pin=pin,
+                    hash_hex=data_hash.hex(),
+                )
+                if not res.get("success"):
+                    raise RuntimeError(res.get("error", "Remote LAN signing failed"))
+                return bytes.fromhex(res["signature_hex"])
+            raise RuntimeError("No active remote LAN token mounted for signing.")
+
         if not self.pkcs11_mgr:
             raise RuntimeError("PKCS#11 manager is not initialized.")
 

@@ -35,6 +35,8 @@ hidden_imports = [
     'asn1crypto.core',
     'asn1crypto.algos',
     'asn1crypto.x509',
+    'core.lan_mesh',
+    'ui.widgets.lan_mesh_widget',
 ]
 
 a = Analysis(

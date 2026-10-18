@@ -46,6 +46,66 @@ class TestUIComponents(unittest.TestCase):
         self.assertIsNotNone(widget.batch_table)
         self.assertIsNotNone(widget.batch_progress)
         self.assertIsNotNone(widget.btn_start_batch)
+    def test_theme_system_and_helpers(self):
+        from ui.styles import get_theme_qss, get_log_console_style, get_status_pill_style, DARK_THEME_QSS, LIGHT_THEME_QSS
+        from ui.widgets.token_banner import TokenBannerWidget
+        from ui.widgets.server_widget import ServerWidget
+        from server.loopback_server import LoopbackServer
+
+        # Validate stylesheets are populated and contain key semantic classes
+        dark_qss = get_theme_qss(is_dark_mode=True)
+        light_qss = get_theme_qss(is_dark_mode=False)
+
+        self.assertIn("HeaderTitle", dark_qss)
+        self.assertIn("HeaderTitle", light_qss)
+        self.assertIn("#f8fafc", light_qss) # Light background
+        self.assertIn("#0f172a", dark_qss) # Dark background
+
+        # Validate console & pill styles
+        dark_console = get_log_console_style(True)
+        light_console = get_log_console_style(False)
+        self.assertIn("#0b1120", dark_console)
+        self.assertIn("#ffffff", light_console)
+
+        dark_pill = get_status_pill_style("active", is_dark_mode=True)
+        light_pill = get_status_pill_style("active", is_dark_mode=False)
+        self.assertIn("#16a34a", dark_pill)
+        self.assertIn("#dcfce7", light_pill)
+
+        # Test widget theme application
+        banner = TokenBannerWidget()
+        banner.apply_theme(False)
+        banner.apply_theme(True)
+        banner.close()
+
+        server = LoopbackServer(None, None, None, None, None)
+        server_widget = ServerWidget(server)
+        server_widget.apply_theme(False)
+        server_widget.apply_theme(True)
+        server_widget.close()
+
+    def test_lan_mesh_widget(self):
+        from core.lan_mesh import LanMeshManager, LanPeer, LanCertificateInfo
+        from ui.widgets.lan_mesh_widget import LanMeshWidget
+
+        mesh_mgr = LanMeshManager(local_port=18200)
+        widget = LanMeshWidget(mesh_mgr)
+        self.assertIsNotNone(widget.chk_share)
+        self.assertIsNotNone(widget.chk_prompt)
+        self.assertFalse(widget.mount_banner.isVisible())
+
+        # Render mock peer
+        peer = LanPeer(
+            peer_id="TEST_PEER_1",
+            hostname="TEST-PEER",
+            ip="192.168.1.55",
+            has_token=True,
+            token_name="HyperPKI HYP2003",
+            token_id="HYP2003",
+            certificates=[LanCertificateInfo(common_name="CA AKASH TEST", pan_number="ABCDE1234F")],
+        )
+        widget._render_peer_cards([peer])
+        self.assertEqual(widget.peer_cards_container.count(), 1)
         widget.close()
 
 

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
     QGroupBox,
+    QScrollArea,
 )
 
 from core.cert_manager import ParsedCertificate
@@ -104,18 +105,21 @@ class PdfSignerWidget(QWidget):
     # TAB 1: Single PDF Signer
     # -------------------------------------------------------------------------
     def _setup_single_tab(self, parent: QWidget):
-        layout = QVBoxLayout(parent)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        parent_layout = QVBoxLayout(parent)
+        parent_layout.setContentsMargins(0, 0, 0, 0)
 
-        card = QFrame()
-        card.setProperty("class", "CardFrame")
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(18, 16, 18, 16)
-        c_layout.setSpacing(12)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        c_layout = QVBoxLayout(content)
+        c_layout.setContentsMargins(16, 16, 16, 16)
+        c_layout.setSpacing(14)
 
         lbl_head = QLabel("PADES PDF DIGITAL SIGNER")
-        lbl_head.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_head.setProperty("class", "SectionTitle")
         c_layout.addWidget(lbl_head)
 
         lbl_desc = QLabel(
@@ -124,43 +128,47 @@ class PdfSignerWidget(QWidget):
             "Supports customizable visible signature stamps."
         )
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl_desc.setProperty("class", "SubText")
         c_layout.addWidget(lbl_desc)
 
         grid = QGridLayout()
-        grid.setVerticalSpacing(8)
+        grid.setVerticalSpacing(10)
         grid.setHorizontalSpacing(14)
 
         # 1. Input PDF File
         lbl_pdf = QLabel("Input PDF File:")
-        lbl_pdf.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_pdf.setProperty("class", "FieldLabel")
         grid.addWidget(lbl_pdf, 0, 0)
 
         pdf_row = QHBoxLayout()
         self.edit_pdf_path = QLineEdit()
+        self.edit_pdf_path.setMinimumHeight(34)
         self.edit_pdf_path.setPlaceholderText("Select or drop a PDF file to sign...")
         pdf_row.addWidget(self.edit_pdf_path)
 
         btn_browse = QPushButton("Browse...")
+        btn_browse.setMinimumHeight(34)
         btn_browse.clicked.connect(self._browse_pdf)
         pdf_row.addWidget(btn_browse)
         grid.addLayout(pdf_row, 0, 1)
 
         # 2. Certificate Selector
         lbl_cert = QLabel("Signing Certificate:")
-        lbl_cert.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_cert.setProperty("class", "FieldLabel")
         grid.addWidget(lbl_cert, 1, 0)
 
         self.combo_certs = QComboBox()
+        self.combo_certs.setMinimumHeight(34)
         grid.addWidget(self.combo_certs, 1, 1)
 
         # 3. Token PIN
         lbl_pin = QLabel("Token User PIN:")
-        lbl_pin.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_pin.setProperty("class", "FieldLabel")
         grid.addWidget(lbl_pin, 2, 0)
 
         pin_row = QHBoxLayout()
         self.edit_pin = QLineEdit()
+        self.edit_pin.setMinimumHeight(34)
         self.edit_pin.setEchoMode(QLineEdit.Password)
         self.edit_pin.setPlaceholderText("Enter token PIN to unlock hardware signing")
         pin_row.addWidget(self.edit_pin)
@@ -168,10 +176,11 @@ class PdfSignerWidget(QWidget):
 
         # 4. Reason
         lbl_reason = QLabel("Signing Reason:")
-        lbl_reason.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_reason.setProperty("class", "FieldLabel")
         grid.addWidget(lbl_reason, 3, 0)
 
         self.combo_reason = QComboBox()
+        self.combo_reason.setMinimumHeight(34)
         self.combo_reason.setEditable(True)
         self.combo_reason.addItem("I have reviewed and approved this document")
         self.combo_reason.addItem("MCA / Registrar of Companies Filing")
@@ -183,23 +192,26 @@ class PdfSignerWidget(QWidget):
 
         # 5. Location
         lbl_loc = QLabel("Signing Location:")
-        lbl_loc.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_loc.setProperty("class", "FieldLabel")
         grid.addWidget(lbl_loc, 4, 0)
 
         self.edit_loc = QLineEdit("India")
+        self.edit_loc.setMinimumHeight(34)
         grid.addWidget(self.edit_loc, 4, 1)
 
         # 6. Output PDF File
         lbl_out = QLabel("Save Signed PDF To:")
-        lbl_out.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_out.setProperty("class", "FieldLabel")
         grid.addWidget(lbl_out, 5, 0)
 
         out_row = QHBoxLayout()
         self.edit_out_path = QLineEdit()
+        self.edit_out_path.setMinimumHeight(34)
         self.edit_out_path.setPlaceholderText("Auto-generated: <filename>_signed.pdf")
         out_row.addWidget(self.edit_out_path)
 
         btn_browse_out = QPushButton("Change...")
+        btn_browse_out.setMinimumHeight(34)
         btn_browse_out.clicked.connect(self._browse_out)
         out_row.addWidget(btn_browse_out)
         grid.addLayout(out_row, 5, 1)
@@ -210,37 +222,47 @@ class PdfSignerWidget(QWidget):
         vis_box = QFrame()
         vis_box.setProperty("class", "SubCardFrame")
         vb_layout = QVBoxLayout(vis_box)
-        vb_layout.setContentsMargins(12, 10, 12, 10)
-        vb_layout.setSpacing(8)
+        vb_layout.setContentsMargins(14, 12, 14, 12)
+        vb_layout.setSpacing(10)
 
-        v_top = QHBoxLayout()
         self.chk_visible = QCheckBox("Add Visible Digital Signature Box (Visual Stamp)")
         self.chk_visible.setChecked(True)
-        self.chk_visible.setStyleSheet("font-weight: 600; color: #38bdf8;")
-        v_top.addWidget(self.chk_visible)
-        v_top.addStretch()
+        self.chk_visible.setProperty("class", "FieldLabel")
+        vb_layout.addWidget(self.chk_visible)
 
-        lbl_pos = QLabel("Position:")
-        lbl_pos.setStyleSheet("color: #94a3b8;")
-        v_top.addWidget(lbl_pos)
+        # Position and Page selectors in a neat row
+        pos_row = QHBoxLayout()
+        pos_row.setSpacing(12)
+
+        lbl_pos = QLabel("Stamp Position:")
+        lbl_pos.setProperty("class", "SubText")
+        pos_row.addWidget(lbl_pos)
+
         self.combo_pos = QComboBox()
+        self.combo_pos.setMinimumHeight(32)
+        self.combo_pos.setMinimumWidth(180)
         self.combo_pos.addItem("Bottom-Right (Standard)", "bottom-right")
         self.combo_pos.addItem("Bottom-Left", "bottom-left")
         self.combo_pos.addItem("Top-Right", "top-right")
         self.combo_pos.addItem("Top-Left", "top-left")
-        v_top.addWidget(self.combo_pos)
+        pos_row.addWidget(self.combo_pos)
 
-        lbl_pg = QLabel("Page:")
-        lbl_pg.setStyleSheet("color: #94a3b8;")
-        v_top.addWidget(lbl_pg)
+        lbl_pg = QLabel("Target Page:")
+        lbl_pg.setProperty("class", "SubText")
+        pos_row.addWidget(lbl_pg)
+
         self.combo_page = QComboBox()
+        self.combo_page.setMinimumHeight(32)
+        self.combo_page.setMinimumWidth(150)
         self.combo_page.addItem("Last Page (Default)", "last")
         self.combo_page.addItem("First Page", "first")
-        v_top.addWidget(self.combo_page)
+        pos_row.addWidget(self.combo_page)
 
-        vb_layout.addLayout(v_top)
+        pos_row.addStretch()
+        vb_layout.addLayout(pos_row)
 
         opts_row = QHBoxLayout()
+        opts_row.setSpacing(16)
         self.chk_show_pan = QCheckBox("Show PAN on Stamp")
         self.chk_show_pan.setChecked(True)
         opts_row.addWidget(self.chk_show_pan)
@@ -261,13 +283,13 @@ class PdfSignerWidget(QWidget):
         act_row = QHBoxLayout()
         self.btn_sign_single = QPushButton("Sign PDF Document")
         self.btn_sign_single.setProperty("class", "PrimaryButton")
-        self.btn_sign_single.setMinimumHeight(38)
+        self.btn_sign_single.setMinimumHeight(40)
         self.btn_sign_single.clicked.connect(self._on_sign_single_clicked)
         act_row.addWidget(self.btn_sign_single)
 
         self.btn_open_signed = QPushButton("Open Signed PDF")
         self.btn_open_signed.setProperty("class", "SuccessButton")
-        self.btn_open_signed.setMinimumHeight(38)
+        self.btn_open_signed.setMinimumHeight(40)
         self.btn_open_signed.setVisible(False)
         self.btn_open_signed.clicked.connect(self._open_signed_pdf)
         act_row.addWidget(self.btn_open_signed)
@@ -279,24 +301,28 @@ class PdfSignerWidget(QWidget):
         self.lbl_single_status.setWordWrap(True)
         c_layout.addWidget(self.lbl_single_status)
 
-        layout.addWidget(card)
+        scroll.setWidget(content)
+        parent_layout.addWidget(scroll)
 
     # -------------------------------------------------------------------------
     # TAB 2: Batch PDF Signer
     # -------------------------------------------------------------------------
     def _setup_batch_tab(self, parent: QWidget):
-        layout = QVBoxLayout(parent)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        parent_layout = QVBoxLayout(parent)
+        parent_layout.setContentsMargins(0, 0, 0, 0)
 
-        card = QFrame()
-        card.setProperty("class", "CardFrame")
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(18, 16, 18, 16)
-        c_layout.setSpacing(12)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        c_layout = QVBoxLayout(content)
+        c_layout.setContentsMargins(16, 16, 16, 16)
+        c_layout.setSpacing(14)
 
         lbl_head = QLabel("HIGH-VOLUME BATCH PDF SIGNER")
-        lbl_head.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_head.setProperty("class", "SectionTitle")
         c_layout.addWidget(lbl_head)
 
         lbl_desc = QLabel(
@@ -304,20 +330,23 @@ class PdfSignerWidget(QWidget):
             "The token session is authenticated once with your PIN so you do not have to re-enter it for every file."
         )
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl_desc.setProperty("class", "SubText")
         c_layout.addWidget(lbl_desc)
 
         # Batch Header Buttons
         btn_bar = QHBoxLayout()
         btn_add_files = QPushButton("➕ Add PDF Files...")
+        btn_add_files.setMinimumHeight(34)
         btn_add_files.clicked.connect(self._batch_add_files)
         btn_bar.addWidget(btn_add_files)
 
         btn_add_folder = QPushButton("📁 Add Entire Folder...")
+        btn_add_folder.setMinimumHeight(34)
         btn_add_folder.clicked.connect(self._batch_add_folder)
         btn_bar.addWidget(btn_add_folder)
 
         btn_clear_batch = QPushButton("Clear List")
+        btn_clear_batch.setMinimumHeight(34)
         btn_clear_batch.clicked.connect(self._batch_clear)
         btn_bar.addWidget(btn_clear_batch)
 
@@ -336,31 +365,42 @@ class PdfSignerWidget(QWidget):
         self.batch_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.batch_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.batch_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.batch_table.setMaximumHeight(160)
+        self.batch_table.setMinimumHeight(120)
+        self.batch_table.setMaximumHeight(200)
         c_layout.addWidget(self.batch_table)
 
         # Batch Config Grid
         b_grid = QGridLayout()
-        b_grid.setVerticalSpacing(8)
-        b_grid.setHorizontalSpacing(12)
+        b_grid.setVerticalSpacing(10)
+        b_grid.setHorizontalSpacing(14)
 
-        b_grid.addWidget(QLabel("Output Directory:"), 0, 0)
+        lbl_b_out = QLabel("Output Directory:")
+        lbl_b_out.setProperty("class", "FieldLabel")
+        b_grid.addWidget(lbl_b_out, 0, 0)
         out_box = QHBoxLayout()
         self.edit_batch_out_dir = QLineEdit()
+        self.edit_batch_out_dir.setMinimumHeight(34)
         self.edit_batch_out_dir.setPlaceholderText("Select folder where signed PDFs will be saved...")
         out_box.addWidget(self.edit_batch_out_dir)
 
         btn_browse_b_out = QPushButton("Browse...")
+        btn_browse_b_out.setMinimumHeight(34)
         btn_browse_b_out.clicked.connect(self._batch_browse_out_dir)
         out_box.addWidget(btn_browse_b_out)
         b_grid.addLayout(out_box, 0, 1)
 
-        b_grid.addWidget(QLabel("Signing Certificate:"), 1, 0)
+        lbl_b_cert = QLabel("Signing Certificate:")
+        lbl_b_cert.setProperty("class", "FieldLabel")
+        b_grid.addWidget(lbl_b_cert, 1, 0)
         self.combo_batch_certs = QComboBox()
+        self.combo_batch_certs.setMinimumHeight(34)
         b_grid.addWidget(self.combo_batch_certs, 1, 1)
 
-        b_grid.addWidget(QLabel("Token PIN (Single Auth):"), 2, 0)
+        lbl_b_pin = QLabel("Token PIN (Single Auth):")
+        lbl_b_pin.setProperty("class", "FieldLabel")
+        b_grid.addWidget(lbl_b_pin, 2, 0)
         self.edit_batch_pin = QLineEdit()
+        self.edit_batch_pin.setMinimumHeight(34)
         self.edit_batch_pin.setEchoMode(QLineEdit.Password)
         self.edit_batch_pin.setPlaceholderText("Enter token PIN once for the entire batch")
         b_grid.addWidget(self.edit_batch_pin, 2, 1)
@@ -370,6 +410,7 @@ class PdfSignerWidget(QWidget):
         # Progress bar
         self.batch_progress = QProgressBar()
         self.batch_progress.setValue(0)
+        self.batch_progress.setMinimumHeight(18)
         self.batch_progress.setVisible(False)
         c_layout.addWidget(self.batch_progress)
 
@@ -377,14 +418,14 @@ class PdfSignerWidget(QWidget):
         b_act_row = QHBoxLayout()
         self.btn_start_batch = QPushButton("⚡ Start Batch Signing")
         self.btn_start_batch.setProperty("class", "PrimaryButton")
-        self.btn_start_batch.setMinimumHeight(38)
+        self.btn_start_batch.setMinimumHeight(40)
         self.btn_start_batch.setEnabled(False)
         self.btn_start_batch.clicked.connect(self._on_start_batch_clicked)
         b_act_row.addWidget(self.btn_start_batch)
 
         self.btn_open_batch_dir = QPushButton("Open Output Folder")
         self.btn_open_batch_dir.setProperty("class", "SuccessButton")
-        self.btn_open_batch_dir.setMinimumHeight(38)
+        self.btn_open_batch_dir.setMinimumHeight(40)
         self.btn_open_batch_dir.setVisible(False)
         self.btn_open_batch_dir.clicked.connect(self._open_batch_folder)
         b_act_row.addWidget(self.btn_open_batch_dir)
@@ -395,7 +436,8 @@ class PdfSignerWidget(QWidget):
         self.lbl_batch_status.setProperty("class", "BadgeInfo")
         c_layout.addWidget(self.lbl_batch_status)
 
-        layout.addWidget(card)
+        scroll.setWidget(content)
+        parent_layout.addWidget(scroll)
 
     # -------------------------------------------------------------------------
     # Single Signing Handlers

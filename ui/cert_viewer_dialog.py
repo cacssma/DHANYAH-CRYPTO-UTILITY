@@ -43,7 +43,7 @@ class CertViewerDialog(QDialog):
 
         top_row = QHBoxLayout()
         lbl_cn = QLabel(self.cert.common_name)
-        lbl_cn.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        lbl_cn.setProperty("class", "HeaderTitle")
         top_row.addWidget(lbl_cn)
         top_row.addStretch()
 
@@ -65,7 +65,7 @@ class CertViewerDialog(QDialog):
         h_layout.addLayout(top_row)
 
         lbl_issuer = QLabel(f"Issued by: {self.cert.issuer_cn} ({self.cert.issuer_o})")
-        lbl_issuer.setStyleSheet("color: #94a3b8; font-size: 12px; margin-top: 4px;")
+        lbl_issuer.setProperty("class", "SubText")
         h_layout.addWidget(lbl_issuer)
 
         main_layout.addWidget(header_card)
@@ -86,7 +86,7 @@ class CertViewerDialog(QDialog):
         cca_grid.setHorizontalSpacing(16)
 
         lbl_cca_head = QLabel("INDIAN CCA DSC IDENTITY ATTRIBUTES")
-        lbl_cca_head.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 700;")
+        lbl_cca_head.setProperty("class", "CardTitle")
         cca_grid.addWidget(lbl_cca_head, 0, 0, 1, 2)
 
         self._add_row(cca_grid, 1, "PAN Number (OID 2.5.4.45):", self.cert.pan_number or "N/A (Individual non-PAN)")
@@ -105,7 +105,7 @@ class CertViewerDialog(QDialog):
         c_grid.setHorizontalSpacing(16)
 
         lbl_c_head = QLabel("VALIDITY & CRYPTOGRAPHIC PARAMETERS")
-        lbl_c_head.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 700;")
+        lbl_c_head.setProperty("class", "CardTitle")
         c_grid.addWidget(lbl_c_head, 0, 0, 1, 2)
 
         self._add_row(c_grid, 1, "Valid From:", self.cert.valid_from.strftime("%d %b %Y, %H:%M:%S UTC"))
@@ -124,7 +124,7 @@ class CertViewerDialog(QDialog):
         fp_grid.setHorizontalSpacing(16)
 
         lbl_fp_head = QLabel("CERTIFICATE FINGERPRINTS")
-        lbl_fp_head.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 700;")
+        lbl_fp_head.setProperty("class", "CardTitle")
         fp_grid.addWidget(lbl_fp_head, 0, 0, 1, 2)
 
         self._add_row(fp_grid, 1, "SHA-256 Fingerprint:", self.cert.fingerprint_sha256, is_mono=True)
@@ -165,16 +165,15 @@ class CertViewerDialog(QDialog):
 
     def _add_row(self, grid: QGridLayout, row: int, label: str, value: str, is_mono: bool = False):
         lbl = QLabel(label)
-        lbl.setStyleSheet("color: #64748b; font-weight: 600;")
+        lbl.setProperty("class", "FieldLabel")
         grid.addWidget(lbl, row, 0)
 
         val = QLabel(value)
         if is_mono:
-            val.setStyleSheet("color: #e2e8f0; font-family: monospace; font-size: 11px;")
-            val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            val.setProperty("class", "TechCode")
         else:
-            val.setStyleSheet("color: #e2e8f0; font-weight: 500;")
-            val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            val.setProperty("class", "ValueText")
+        val.setTextInteractionFlags(Qt.TextSelectableByMouse)
         grid.addWidget(val, row, 1)
 
     def _export_der(self):

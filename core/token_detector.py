@@ -86,6 +86,9 @@ def identify_token_by_atr(atr_hex: str) -> Optional[Dict[str, Any]]:
                     elif "000006000000" in clean_atr or "66465305" in clean_atr:
                         res_profile["name"] = "HyperPKI HYP 2003 (Standard v3.0)"
                         res_profile["model"] = "HYP 2003 Standard"
+                elif token_key == TOKEN_PROXKEY:
+                    res_profile["name"] = "Watchdata ProxKey"
+                    res_profile["model"] = "ProxKey WD6A / USB CCID"
                 return res_profile
 
     return None
@@ -118,7 +121,7 @@ class TokenDetector:
         self._callbacks_remove: List[Callable[[str], None]] = []
         self._current_tokens: Dict[str, DetectedToken] = {}  # reader_name -> DetectedToken
         self._simulated_token: Optional[DetectedToken] = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def register_insertion_callback(self, cb: Callable[[DetectedToken], None]):
         """Register callback for token insertion event."""
@@ -265,32 +268,43 @@ class TokenDetector:
         except Exception as e:
             logger.debug(f"pyscard polling error: {e}")
 
-        # Reconcile inserted tokens
+        newly_inserted = []
+        removed_readers_list = []
+
+        # Reconcile inserted tokens under lock
         with self._lock:
-            # Check newly inserted
             for reader_name, token in detected_this_cycle.items():
                 if reader_name not in self._current_tokens:
                     if self._simulated_token:
                         logger.info("Physical hardware token detected; auto-disabling simulation mode.")
                         self._simulated_token = None
                     self._current_tokens[reader_name] = token
-                    logger.info(f"Hardware Token Inserted: {token}")
-                    for cb in self._callbacks_insert:
-                        try:
-                            cb(token)
-                        except Exception as e:
-                            logger.error(f"Error in insertion callback: {e}")
+                    newly_inserted.append(token)
 
-            # Check removed
             removed_readers = [r for r in self._current_tokens if r not in detected_this_cycle]
             for reader_name in removed_readers:
                 del self._current_tokens[reader_name]
-                logger.info(f"Token Removed from reader: {reader_name}")
-                for cb in self._callbacks_remove:
-                    try:
-                        cb(reader_name)
-                    except Exception as e:
-                        logger.error(f"Error in removal callback: {e}")
+                removed_readers_list.append(reader_name)
+
+            insert_callbacks = list(self._callbacks_insert)
+            remove_callbacks = list(self._callbacks_remove)
+
+        # Fire callbacks safely outside the lock to prevent deadlock
+        for token in newly_inserted:
+            logger.info(f"Hardware Token Inserted: {token}")
+            for cb in insert_callbacks:
+                try:
+                    cb(token)
+                except Exception as e:
+                    logger.error(f"Error in insertion callback: {e}")
+
+        for reader_name in removed_readers_list:
+            logger.info(f"Token Removed from reader: {reader_name}")
+            for cb in remove_callbacks:
+                try:
+                    cb(reader_name)
+                except Exception as e:
+                    logger.error(f"Error in removal callback: {e}")
 
     def _poll_winscard_ctypes(self, out_tokens: Dict[str, DetectedToken]):
         """Direct WinSCard API fallback via ctypes for Windows."""

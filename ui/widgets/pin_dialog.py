@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QMessageBox,
     QCheckBox,
+    QScrollArea,
 )
 
 from core.pin_manager import PinManager, PinResult
@@ -46,8 +47,17 @@ class PinManagementWidget(QWidget):
         self.lbl_verify_res.setStyleSheet("")
 
     def _init_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QHBoxLayout(content)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(16)
 
         # Left Column: PIN Verification
@@ -58,7 +68,7 @@ class PinManagementWidget(QWidget):
         v_layout.setSpacing(12)
 
         lbl_v_title = QLabel("VERIFY TOKEN PIN")
-        lbl_v_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_v_title.setProperty("class", "SectionTitle")
         v_layout.addWidget(lbl_v_title)
 
         lbl_v_desc = QLabel(
@@ -66,14 +76,15 @@ class PinManagementWidget(QWidget):
             "Safe C_Login test."
         )
         lbl_v_desc.setWordWrap(True)
-        lbl_v_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl_v_desc.setProperty("class", "SubText")
         v_layout.addWidget(lbl_v_desc)
 
         lbl_v_pin = QLabel("User PIN:")
-        lbl_v_pin.setStyleSheet("font-weight: 600; color: #cbd5e1; margin-top: 10px;")
+        lbl_v_pin.setProperty("class", "FieldLabel")
         v_layout.addWidget(lbl_v_pin)
 
         self.edit_verify_pin = QLineEdit()
+        self.edit_verify_pin.setMinimumHeight(34)
         self.edit_verify_pin.setEchoMode(QLineEdit.Password)
         self.edit_verify_pin.setPlaceholderText("Enter token PIN (e.g. 12345678)")
         v_layout.addWidget(self.edit_verify_pin)
@@ -86,6 +97,7 @@ class PinManagementWidget(QWidget):
 
         self.btn_verify = QPushButton("Verify PIN")
         self.btn_verify.setProperty("class", "PrimaryButton")
+        self.btn_verify.setMinimumHeight(38)
         self.btn_verify.clicked.connect(self._on_verify_clicked)
         v_layout.addWidget(self.btn_verify)
 
@@ -105,7 +117,7 @@ class PinManagementWidget(QWidget):
             "If you are unsure of the PIN, check with your DSC provider before retrying."
         )
         lbl_warn.setWordWrap(True)
-        lbl_warn.setStyleSheet("color: #fbbf24; font-size: 11px;")
+        lbl_warn.setStyleSheet("color: #d97706; font-size: 11px; font-weight: 500;")
         wn_layout.addWidget(lbl_warn)
         v_layout.addWidget(warn_note)
 
@@ -119,38 +131,41 @@ class PinManagementWidget(QWidget):
         c_layout.setSpacing(12)
 
         lbl_c_title = QLabel("CHANGE TOKEN PIN")
-        lbl_c_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        lbl_c_title.setProperty("class", "SectionTitle")
         c_layout.addWidget(lbl_c_title)
 
         lbl_c_desc = QLabel(
             "Update the User PIN for this crypto token using the standard PKCS#11 C_SetPIN interface."
         )
         lbl_c_desc.setWordWrap(True)
-        lbl_c_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl_c_desc.setProperty("class", "SubText")
         c_layout.addWidget(lbl_c_desc)
 
         # Inputs
         lbl_old = QLabel("Current (Old) PIN:")
-        lbl_old.setStyleSheet("font-weight: 600; color: #cbd5e1; margin-top: 6px;")
+        lbl_old.setProperty("class", "FieldLabel")
         c_layout.addWidget(lbl_old)
 
         self.edit_old_pin = QLineEdit()
+        self.edit_old_pin.setMinimumHeight(34)
         self.edit_old_pin.setEchoMode(QLineEdit.Password)
         c_layout.addWidget(self.edit_old_pin)
 
         lbl_new = QLabel("New PIN (4-16 chars):")
-        lbl_new.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_new.setProperty("class", "FieldLabel")
         c_layout.addWidget(lbl_new)
 
         self.edit_new_pin = QLineEdit()
+        self.edit_new_pin.setMinimumHeight(34)
         self.edit_new_pin.setEchoMode(QLineEdit.Password)
         c_layout.addWidget(self.edit_new_pin)
 
         lbl_confirm = QLabel("Confirm New PIN:")
-        lbl_confirm.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        lbl_confirm.setProperty("class", "FieldLabel")
         c_layout.addWidget(lbl_confirm)
 
         self.edit_confirm_pin = QLineEdit()
+        self.edit_confirm_pin.setMinimumHeight(34)
         self.edit_confirm_pin.setEchoMode(QLineEdit.Password)
         c_layout.addWidget(self.edit_confirm_pin)
 
@@ -160,16 +175,20 @@ class PinManagementWidget(QWidget):
 
         self.btn_change = QPushButton("Update Token PIN")
         self.btn_change.setProperty("class", "SuccessButton")
+        self.btn_change.setMinimumHeight(38)
         self.btn_change.clicked.connect(self._on_change_clicked)
         c_layout.addWidget(self.btn_change)
 
         self.lbl_change_res = QLabel("PIN length must be 4 to 16 characters.")
-        self.lbl_change_res.setStyleSheet("color: #64748b; font-size: 11px;")
+        self.lbl_change_res.setProperty("class", "SubText")
         c_layout.addWidget(self.lbl_change_res)
 
         c_layout.addStretch()
 
         layout.addWidget(change_card)
+
+        scroll.setWidget(content)
+        root_layout.addWidget(scroll)
 
     def _toggle_change_visibility(self, checked: bool):
         mode = QLineEdit.Normal if checked else QLineEdit.Password
@@ -236,8 +255,10 @@ class PinManagementWidget(QWidget):
             self.edit_new_pin.clear()
             self.edit_confirm_pin.clear()
             self.lbl_change_res.setText("Token PIN successfully updated.")
-            self.lbl_change_res.setStyleSheet("color: #34d399; font-weight: 600;")
+            self.lbl_change_res.setProperty("class", "BadgeValid")
+            self.lbl_change_res.setStyleSheet("")
         else:
             QMessageBox.critical(self, "PIN Change Error", res.message)
             self.lbl_change_res.setText(res.message)
-            self.lbl_change_res.setStyleSheet("color: #f87171; font-weight: 600;")
+            self.lbl_change_res.setProperty("class", "BadgeExpired")
+            self.lbl_change_res.setStyleSheet("")

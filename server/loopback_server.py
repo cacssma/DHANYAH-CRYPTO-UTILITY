@@ -10,12 +10,19 @@ import base64
 import json
 import logging
 import os
+import socket
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional, Any, Tuple
 
-from core.constants import DEFAULT_LOOPBACK_HOST, DEFAULT_LOOPBACK_PORT
+from core.constants import (
+    DEFAULT_LOOPBACK_HOST,
+    DEFAULT_LOOPBACK_PORT,
+    APP_VERSION,
+    run_silent_cmd,
+    get_silent_subprocess_kwargs,
+)
 
 logger = logging.getLogger("DhanyahCrypto.Loopback")
 
@@ -91,14 +98,8 @@ def ensure_localhost_ssl_cert(force_recreate: bool = False) -> Tuple[str, str]:
 
 def check_embridge_service_running() -> bool:
     """Checks if official eMudhra emBridge background Windows service is currently running."""
-    import subprocess
     try:
-        res = subprocess.run(
-            ["sc", "query", "emBridge"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
+        res = run_silent_cmd(["sc", "query", "emBridge"], timeout=2.0)
         return "RUNNING" in res.stdout
     except Exception:
         return False
@@ -106,23 +107,12 @@ def check_embridge_service_running() -> bool:
 
 def stop_embridge_service() -> Tuple[bool, str]:
     """Stops the official eMudhra emBridge Windows service if requested by user."""
-    import subprocess
     try:
-        res = subprocess.run(
-            ["net", "stop", "emBridge"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        res = run_silent_cmd(["net", "stop", "emBridge"], timeout=5.0)
         if res.returncode == 0:
             logger.info("Official emBridge Windows service stopped.")
             return True, "Official emBridge service stopped successfully."
-        res2 = subprocess.run(
-            ["sc", "stop", "emBridge"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        res2 = run_silent_cmd(["sc", "stop", "emBridge"], timeout=5.0)
         if res2.returncode == 0:
             return True, "Official emBridge service stopped."
         return False, res2.stderr or res2.stdout or res.stdout
@@ -133,23 +123,12 @@ def stop_embridge_service() -> Tuple[bool, str]:
 
 def start_embridge_service() -> Tuple[bool, str]:
     """Starts the official eMudhra emBridge Windows service if it was stopped."""
-    import subprocess
     try:
-        res = subprocess.run(
-            ["net", "start", "emBridge"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        res = run_silent_cmd(["net", "start", "emBridge"], timeout=5.0)
         if res.returncode == 0:
             logger.info("Official emBridge Windows service started.")
             return True, "Official emBridge service started successfully."
-        res2 = subprocess.run(
-            ["sc", "start", "emBridge"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        res2 = run_silent_cmd(["sc", "start", "emBridge"], timeout=5.0)
         if res2.returncode == 0:
             return True, "Official emBridge service started."
         return False, res2.stderr or res2.stdout or res.stdout
@@ -164,26 +143,15 @@ def install_localhost_root_ca() -> Tuple[bool, str]:
     if not os.path.exists(crt_path):
         return False, "Certificate file not found."
 
-    import subprocess
     try:
         # Use certutil -f -addstore Root for silent machine root trust
-        res = subprocess.run(
-            ["certutil", "-f", "-addstore", "Root", crt_path],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        res = run_silent_cmd(["certutil", "-f", "-addstore", "Root", crt_path], timeout=10.0)
         if res.returncode == 0:
             logger.info("Localhost SSL certificate successfully added to Windows Root store.")
             return True, "Localhost SSL certificate successfully trusted in Windows Root store."
 
         # Fallback to User Root
-        res2 = subprocess.run(
-            ["certutil", "-f", "-addstore", "-user", "Root", crt_path],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        res2 = run_silent_cmd(["certutil", "-f", "-addstore", "-user", "Root", crt_path], timeout=10.0)
         if res2.returncode == 0:
             return True, "Localhost SSL certificate successfully trusted in User Root store."
         return False, f"Certutil error ({res.returncode}): {res.stderr or res.stdout}"
@@ -310,27 +278,35 @@ def save_gateway_ports_config(ports_list: List[Dict[str, Any]]) -> bool:
         return False
 
 
+def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """Fast non-blocking socket check to see if port is occupied."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            return s.connect_ex((host, port)) == 0
+    except Exception:
+        return False
+
+
 def find_process_on_port(port: int) -> Optional[Tuple[int, str]]:
     """Returns (pid, proc_name) if port is currently occupied by an external process."""
-    import subprocess
+    if not is_port_in_use(port):
+        return None
     try:
-        output = subprocess.check_output(
-            ["netstat", "-ano", "-p", "tcp"],
-            text=True,
-            timeout=2,
-        )
-        for line in output.splitlines():
+        res = run_silent_cmd(["netstat", "-ano", "-p", "tcp"], timeout=2.0)
+        for line in res.stdout.splitlines():
             parts = line.strip().split()
             if len(parts) >= 5 and "LISTENING" in parts:
                 local_addr = parts[1]
                 if local_addr.endswith(f":{port}"):
                     pid = int(parts[-1])
                     try:
-                        proc_out = subprocess.check_output(
+                        p_res = run_silent_cmd(
                             ["tasklist", "/fi", f"PID eq {pid}", "/fo", "csv", "/nh"],
-                            text=True,
-                            timeout=1,
+                            timeout=1.5,
                         )
+                        proc_out = p_res.stdout
                         name = proc_out.split(",")[0].replace('"', "").strip() if proc_out else f"PID {pid}"
                     except Exception:
                         name = f"PID {pid}"
@@ -349,12 +325,9 @@ def kill_process_on_port(port: int) -> Tuple[bool, str]:
     if pid == os.getpid():
         return False, f"Port {port} is held by this application."
     try:
-        import subprocess
-        res = subprocess.run(
+        res = run_silent_cmd(
             ["taskkill", "/F", "/PID", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
+            timeout=5.0,
         )
         if res.returncode == 0:
             logger.info(f"Terminated conflicting process {name} (PID {pid}) on port {port}.")
@@ -362,6 +335,7 @@ def kill_process_on_port(port: int) -> Tuple[bool, str]:
         return False, f"Could not terminate PID {pid}: {res.stderr or res.stdout}"
     except Exception as e:
         return False, f"Failed to kill process on port {port}: {e}"
+
 
 
 def test_port_connectivity(port: int, protocol: str = "http", timeout: float = 2.0) -> Tuple[bool, str]:
@@ -429,6 +403,8 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             self._handle_drivers()
         elif path in ["/ports", "/gateway/ports"]:
             self._handle_ports_overview()
+        elif path in ["/api/lan/info", "/lan/info"]:
+            self._handle_lan_info()
         else:
             self._send_json(404, {"error": "Endpoint not found", "path": path})
 
@@ -473,6 +449,8 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             self._handle_sign_pdf(payload)
         elif path in ["/ports", "/gateway/ports"]:
             self._handle_ports_overview()
+        elif path in ["/api/lan/sign", "/lan/sign"]:
+            self._handle_lan_sign(payload)
         elif path == "/":
             action = str(payload.get("action", "")).lower()
             if "cert" in action:
@@ -493,20 +471,119 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         app = self.server_app
         token = app.get_primary_token()
         drivers = app.get_driver_statuses()
+        is_remote = bool(token and getattr(token, "token_id", "") == "REMOTE_LAN")
+        remote_display = app.lan_mesh_mgr.mounted_peer.display_name if is_remote and app.lan_mesh_mgr and app.lan_mesh_mgr.mounted_peer else None
 
         data = {
             "status": "online",
             "service": "Dhanyah Crypto Utility Gateway",
+            "version": APP_VERSION,
             "port": app.port,
             "active_ports": app.active_ports,
             "port_protocols": getattr(app, "port_protocols", {}),
             "ports_overview": app.get_port_overview() if hasattr(app, "get_port_overview") else [],
             "https_enabled": any(proto == "https" for proto in getattr(app, "port_protocols", {}).values()),
             "token_connected": token is not None,
+            "is_remote_lan_token": is_remote,
+            "remote_peer": remote_display,
             "token": token.to_dict() if token else None,
             "drivers": [d.to_dict() for d in drivers],
         }
         self._send_json(200, data)
+
+    def _handle_lan_info(self):
+        """Returns workstation info and public certificates for LAN Mesh discovery."""
+        app = self.server_app
+        token = app.get_primary_token()
+        certs = app.get_certificates()
+        cert_items = []
+        for c in certs:
+            cert_items.append({
+                "common_name": c.common_name,
+                "pan_number": getattr(c, "pan_number", ""),
+                "cert_class": getattr(c, "cert_class", "Class 3"),
+                "issuer": getattr(c, "issuer_cn", ""),
+                "issuer_o": getattr(c, "issuer_o", ""),
+                "valid_from": c.valid_from.isoformat() if hasattr(c, "valid_from") and c.valid_from else "",
+                "valid_to": c.valid_to.isoformat() if hasattr(c, "valid_to") and c.valid_to else "",
+                "serial_hex": getattr(c, "serial_number_hex", ""),
+                "fingerprint_sha256": getattr(c, "fingerprint_sha256", ""),
+                "cert_der_b64": base64.b64encode(c.cert_der).decode("ascii") if hasattr(c, "cert_der") else "",
+            })
+
+        sharing_ok = app.lan_mesh_mgr.is_sharing_enabled if app.lan_mesh_mgr else True
+        require_prompt = app.lan_mesh_mgr.require_prompt_before_sign if app.lan_mesh_mgr else False
+
+        self._send_json(200, {
+            "app": "DhanyahCryptoUtility",
+            "version": APP_VERSION,
+            "hostname": socket.gethostname(),
+            "has_token": bool(token) and getattr(token, "token_id", "") != "REMOTE_LAN",
+            "token_name": token.name if token and getattr(token, "token_id", "") != "REMOTE_LAN" else "",
+            "token_id": token.token_id if token and getattr(token, "token_id", "") != "REMOTE_LAN" else "",
+            "is_simulated": getattr(token, "is_simulated", False) if token else False,
+            "sharing_enabled": sharing_ok,
+            "require_prompt": require_prompt,
+            "certificates": cert_items,
+        })
+
+    def _handle_lan_sign(self, payload: Dict[str, Any]):
+        """Processes cryptographic signing requests received from another LAN workstation."""
+        app = self.server_app
+        if app.lan_mesh_mgr and not app.lan_mesh_mgr.is_sharing_enabled:
+            self._send_json(403, {"success": False, "error": "Token sharing is disabled on this workstation."})
+            return
+
+        token = app.get_primary_token()
+        if not token or getattr(token, "token_id", "") == "REMOTE_LAN":
+            self._send_json(400, {"success": False, "error": "No physical hardware token connected to this host."})
+            return
+
+        pin = payload.get("pin", "")
+        hash_hex = payload.get("hash_hex", "")
+        raw_b64 = payload.get("data_b64", "")
+        client_host = payload.get("client_hostname", "Remote LAN Client")
+        client_ip = payload.get("client_ip", self.client_address[0])
+
+        if not pin:
+            self._send_json(400, {"success": False, "error": "Token PIN is required."})
+            return
+
+        logger.info(f"Incoming LAN signing request from {client_host} ({client_ip}) on token {token.name}")
+
+        try:
+            if hash_hex:
+                data_hash = bytes.fromhex(hash_hex)
+                raw_sig = app.signer.sign_hash_hardware(
+                    token_id=token.token_id,
+                    slot=payload.get("slot", 0),
+                    pin=pin,
+                    data_hash=data_hash,
+                    is_simulated=token.is_simulated,
+                )
+            elif raw_b64:
+                raw_data = base64.b64decode(raw_b64)
+                raw_sig = app.signer.sign_data(
+                    token_id=token.token_id,
+                    slot=payload.get("slot", 0),
+                    pin=pin,
+                    raw_data=raw_data,
+                    is_simulated=token.is_simulated,
+                )
+            else:
+                self._send_json(400, {"success": False, "error": "hash_hex or data_b64 is required."})
+                return
+
+            self._send_json(200, {
+                "success": True,
+                "signature_hex": raw_sig.hex().upper(),
+                "signature_b64": base64.b64encode(raw_sig).decode("ascii"),
+                "signed_by": token.name,
+                "host": socket.gethostname(),
+            })
+        except Exception as e:
+            logger.error(f"LAN signing error: {e}")
+            self._send_json(500, {"success": False, "error": str(e)})
 
     def _handle_drivers(self):
         app = self.server_app
@@ -564,6 +641,30 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
                 return
         else:
             self._send_json(400, {"success": False, "error": "hash_hex or hash_b64 is required."})
+            return
+
+        # Check if remote token proxy is active
+        if getattr(token, "token_id", "") == "REMOTE_LAN":
+            peer = app.lan_mesh_mgr.mounted_peer if app.lan_mesh_mgr else None
+            if not peer:
+                self._send_json(400, {"success": False, "error": "Mounted remote peer is offline."})
+                return
+            res = app.lan_mesh_mgr.sign_remote_hash(
+                peer_ip=peer.ip,
+                peer_port=peer.port,
+                pin=pin,
+                hash_hex=data_hash.hex(),
+            )
+            if not res.get("success"):
+                self._send_json(500, {"success": False, "error": res.get("error", "Remote sign failed")})
+                return
+            self._send_json(200, {
+                "success": True,
+                "signature_hex": res.get("signature_hex"),
+                "signature_b64": res.get("signature_b64"),
+                "is_remote": True,
+                "remote_peer": peer.display_name,
+            })
             return
 
         try:
@@ -774,6 +875,35 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         cert = certs[0] if certs else None
         ck_id = cert.ck_id if cert else b""
 
+        # Check if remote token proxy is active
+        if getattr(token, "token_id", "") == "REMOTE_LAN":
+            peer = app.lan_mesh_mgr.mounted_peer if app.lan_mesh_mgr else None
+            if not peer:
+                self._send_json(200, {"status": 0, "version": "5.9.3.1", "message": "Mounted remote token peer is offline."})
+                return
+            hash_str = input_bytes.hex() if len(input_bytes) in [20, 32, 64] else input_bytes.hex()
+            res = app.lan_mesh_mgr.sign_remote_hash(
+                peer_ip=peer.ip,
+                peer_port=peer.port,
+                pin=pin,
+                hash_hex=hash_str,
+            )
+            if not res.get("success"):
+                self._send_json(200, {"status": 0, "version": "5.9.3.1", "message": res.get("error", "Remote sign failed")})
+                return
+            sig_b64 = res.get("signature_b64")
+            self._send_json(
+                200,
+                {
+                    "status": 1,
+                    "version": "5.9.3.1",
+                    "message": "Data signed successfully via LAN Mesh",
+                    "signedText": sig_b64,
+                    "signature": sig_b64,
+                },
+            )
+            return
+
         try:
             if len(input_bytes) in [20, 32, 64]:
                 sig_bytes = app.signer.sign_hash_hardware(
@@ -848,6 +978,25 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
         cert = certs[0] if certs else None
         ck_id = cert.ck_id if cert else b""
 
+        # Check if remote token proxy is active
+        if getattr(token, "token_id", "") == "REMOTE_LAN":
+            peer = app.lan_mesh_mgr.mounted_peer if app.lan_mesh_mgr else None
+            if not peer:
+                self._send_json(400, {"status": "error", "error": "Mounted remote peer is offline."})
+                return
+            hash_str = input_bytes.hex() if len(input_bytes) in [20, 32, 64] else input_bytes.hex()
+            res = app.lan_mesh_mgr.sign_remote_hash(
+                peer_ip=peer.ip,
+                peer_port=peer.port,
+                pin=pin,
+                hash_hex=hash_str,
+            )
+            if not res.get("success"):
+                self._send_json(500, {"status": "error", "error": res.get("error", "Remote sign failed")})
+                return
+            self._send_json(200, {"status": "success", "signature": res.get("signature_b64")})
+            return
+
         try:
             if len(input_bytes) in [20, 32, 64]:
                 sig_bytes = app.signer.sign_hash_hardware(
@@ -903,6 +1052,7 @@ class LoopbackServer:
         signer,
         host: str = DEFAULT_LOOPBACK_HOST,
         port: int = DEFAULT_LOOPBACK_PORT,
+        lan_mesh_mgr=None,
     ):
         self.detector = token_detector
         self.pkcs11_mgr = pkcs11_mgr
@@ -911,6 +1061,7 @@ class LoopbackServer:
         self.signer = signer
         self.host = host
         self.port = port
+        self.lan_mesh_mgr = lan_mesh_mgr
         self._servers: Dict[int, ThreadingHTTPServer] = {}
         self._server_threads: Dict[int, threading.Thread] = {}
         self.active_ports: List[int] = []
@@ -934,7 +1085,20 @@ class LoopbackServer:
         self.log_callback: Optional[Callable[[str], None]] = None
 
     def get_primary_token(self):
-        return self.detector.get_primary_token()
+        token = self.detector.get_primary_token() if self.detector else None
+        if not token and self.lan_mesh_mgr and self.lan_mesh_mgr.mounted_peer:
+            peer = self.lan_mesh_mgr.mounted_peer
+            from core.token_detector import DetectedToken
+            return DetectedToken(
+                token_id="REMOTE_LAN",
+                name=f"{peer.token_name} on {peer.hostname}",
+                vendor=f"LAN Virtual ({peer.ip})",
+                reader_name=f"LAN Virtual ({peer.ip}:{peer.port})",
+                atr=f"LAN_{peer.peer_id}",
+                fips_level="FIPS 140-2/3 L3 (LAN Remote)",
+                is_simulated=False,
+            )
+        return token
 
     def get_driver_statuses(self):
         return self.pkcs11_mgr.get_all_driver_statuses()
@@ -942,6 +1106,11 @@ class LoopbackServer:
     def get_certificates(self):
         token = self.get_primary_token()
         if not token:
+            return []
+        if getattr(token, "token_id", "") == "REMOTE_LAN":
+            peer = self.lan_mesh_mgr.mounted_peer if self.lan_mesh_mgr else None
+            if peer and peer.certificates:
+                return [c.to_parsed_certificate() for c in peer.certificates]
             return []
         if token.is_simulated or token.token_id == "SIMULATED":
             return [self.cert_manager.generate_simulated_dsc()]
