@@ -4,6 +4,7 @@ Monitors PC/SC Readers, ATR Signatures, and USB Hotplug Events.
 """
 
 import logging
+import sys
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple, Any

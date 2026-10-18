@@ -7,6 +7,7 @@ Provides REST & JSON endpoints with CORS support for:
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -588,7 +589,7 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             algo = payload.get("algo", "SHA256")
             if hash_hex:
                 data_hash = bytes.fromhex(hash_hex)
-                if len(data_hash) not in [20, 32, 64]:
+                if len(data_hash) not in [20, 32, 48, 64]:
                     data_hash = hashlib.sha256(data_hash).digest()
                 raw_sig = app.signer.sign_hash_hardware(
                     token_id=target_token_id,
@@ -966,7 +967,7 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             if not peer:
                 self._send_json(200, {"status": 0, "version": "5.9.3.1", "message": "Mounted remote token peer is offline."})
                 return
-            if len(input_bytes) in [20, 32, 64]:
+            if len(input_bytes) in [20, 32, 48, 64]:
                 hash_to_send = input_bytes
             else:
                 if str(algo).upper() in ["SHA1", "SHA-1"]:
@@ -1004,7 +1005,7 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            if len(input_bytes) in [20, 32, 64]:
+            if len(input_bytes) in [20, 32, 48, 64]:
                 sig_bytes = app.signer.sign_hash_hardware(
                     token_id=target_token_id,
                     slot=target_slot,
@@ -1099,12 +1100,27 @@ class LoopbackRequestHandler(BaseHTTPRequestHandler):
             if not peer:
                 self._send_json(400, {"status": "error", "error": "Mounted remote peer is offline."})
                 return
-            hash_str = input_bytes.hex() if len(input_bytes) in [20, 32, 64] else input_bytes.hex()
+            # Hash the data if it is not already a digest-sized blob
+            if len(input_bytes) in [20, 32, 48, 64]:
+                hash_bytes = input_bytes
+            else:
+                algo_upper = str(algo).upper().replace("-", "")
+                if algo_upper in ("SHA1",):
+                    hash_bytes = hashlib.sha1(input_bytes).digest()
+                elif algo_upper in ("SHA384",):
+                    hash_bytes = hashlib.sha384(input_bytes).digest()
+                elif algo_upper in ("SHA512",):
+                    hash_bytes = hashlib.sha512(input_bytes).digest()
+                else:
+                    hash_bytes = hashlib.sha256(input_bytes).digest()
             res = app.lan_mesh_mgr.sign_remote_hash(
                 peer_ip=peer.ip,
                 peer_port=peer.port,
                 pin=pin,
-                hash_hex=hash_str,
+                hash_hex=hash_bytes.hex(),
+                serial_hex=getattr(target_cert, "serial_number_hex", "") if target_cert else str(target_serial or ""),
+                alias=getattr(target_cert, "common_name", "") if target_cert else str(target_alias or ""),
+                algo=algo,
             )
             if not res.get("success"):
                 self._send_json(500, {"status": "error", "error": res.get("error", "Remote sign failed")})

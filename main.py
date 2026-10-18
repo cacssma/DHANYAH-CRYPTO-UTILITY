@@ -68,6 +68,19 @@ def run_headless(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
 
     mesh_mgr = LanMeshManager(local_port=args.port)
     mesh_mgr.get_local_token_fn = detector.get_primary_token
+    mesh_mgr.get_local_tokens_fn = detector.get_connected_tokens
+
+    # Dynamically fetch certs from all connected tokens at broadcast time
+    def _headless_get_certs():
+        tokens = detector.get_connected_tokens()
+        if not tokens:
+            return []
+        try:
+            return cert_mgr.get_all_certificates(tokens)
+        except Exception:
+            return []
+
+    mesh_mgr.get_local_certs_fn = _headless_get_certs
     mesh_mgr.start()
 
     server = LoopbackServer(
@@ -139,8 +152,27 @@ def run_gui(args, detector, pkcs11_mgr, cert_mgr, pin_mgr, signer):
     if args.sim:
         detector.set_simulation_mode(args.sim.upper())
 
-    # Initialize LAN Mesh Manager
+    # Initialize LAN Mesh Manager with live cert provider callbacks
     mesh_mgr = LanMeshManager(local_port=args.port)
+    mesh_mgr.get_local_token_fn = detector.get_primary_token
+    mesh_mgr.get_local_tokens_fn = detector.get_connected_tokens
+
+    # Dynamically fetch certs from all connected tokens at broadcast time.
+    # This is called every 4 seconds by the broadcast worker, so it always
+    # returns fresh certificate data regardless of UI state.
+    def _gui_get_certs():
+        tokens = detector.get_connected_tokens()
+        if not tokens:
+            return []
+        try:
+            return cert_mgr.get_all_certificates(tokens)
+        except Exception:
+            return []
+
+    mesh_mgr.get_local_certs_fn = _gui_get_certs
+
+    # Start LAN Mesh discovery and broadcast before server and GUI
+    mesh_mgr.start()
 
     # Start loopback server
     server = LoopbackServer(

@@ -121,13 +121,26 @@ class MainWindow(QMainWindow):
         self.server.lan_mesh_mgr = self.mesh_mgr
         self.signer.lan_mesh_mgr = self.mesh_mgr
 
-        # Provider callbacks to publish local hardware tokens and certificates to LAN
-        self.mesh_mgr.get_local_token_fn = self.detector.get_primary_token
-        self.mesh_mgr.get_local_tokens_fn = self.detector.get_connected_tokens
-        self.mesh_mgr.get_local_certs_fn = lambda: getattr(self, "cert_table", None) and self.cert_table.certificates or []
+        # Ensure token/certs provider callbacks are set (may already be configured from main.py)
+        if not self.mesh_mgr.get_local_token_fn:
+            self.mesh_mgr.get_local_token_fn = self.detector.get_primary_token
+        if not getattr(self.mesh_mgr, "get_local_tokens_fn", None):
+            self.mesh_mgr.get_local_tokens_fn = self.detector.get_connected_tokens
+        # Only set get_local_certs_fn if not already configured with a live cert-manager function
+        if not self.mesh_mgr.get_local_certs_fn:
+            def _win_get_certs():
+                tokens = self.detector.get_connected_tokens()
+                if not tokens:
+                    return []
+                try:
+                    return self.cert_mgr.get_all_certificates(tokens)
+                except Exception:
+                    return []
+            self.mesh_mgr.get_local_certs_fn = _win_get_certs
 
-        # Start LAN discovery and broadcast
-        self.mesh_mgr.start()
+        # Start LAN discovery and broadcast only if not already running
+        if not self.mesh_mgr._running:
+            self.mesh_mgr.start()
 
         self.bridge = EventBridge()
         self.bridge.token_inserted_signal.connect(self._on_token_inserted_ui)
