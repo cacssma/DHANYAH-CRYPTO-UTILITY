@@ -39,10 +39,10 @@ echo Compiling installer with: "%ISCC%"
 if %ERRORLEVEL% equ 0 (
     echo.
     echo SUCCESS: Installer generated successfully in dist_installer\
-    echo Output: dist_installer\DhanyahCryptoUtility_Setup_v1.1.1.exe
+    echo Output: dist_installer\DhanyahCryptoUtility_Setup_v1.1.2.exe
     if not exist "releases" mkdir "releases"
-    copy /y "dist_installer\DhanyahCryptoUtility_Setup_v1.1.1.exe" "releases\DhanyahCryptoUtility_Setup_v1.1.1.exe" >nul
-    echo Copied installer to releases\DhanyahCryptoUtility_Setup_v1.1.1.exe
+    copy /y "dist_installer\DhanyahCryptoUtility_Setup_v1.1.2.exe" "releases\DhanyahCryptoUtility_Setup_v1.1.2.exe" >nul
+    echo Copied installer to releases\DhanyahCryptoUtility_Setup_v1.1.2.exe
     echo =========================================================
 ) else (
     echo.
