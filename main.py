@@ -200,6 +200,7 @@ def main():
     logger.info("Initializing Core Cryptographic Subsystems...")
     detector = TokenDetector()
     pkcs11_mgr = PKCS11Manager()
+    detector.set_pkcs11_manager(pkcs11_mgr)
     cert_mgr = CertManager(pkcs11_mgr)
     pin_mgr = PinManager(pkcs11_mgr)
     signer = TokenSigner(pkcs11_mgr)

@@ -135,7 +135,9 @@ class MainWindow(QMainWindow):
         # Wire detector callbacks into bridge
         self.detector.register_insertion_callback(lambda token: self.bridge.token_inserted_signal.emit(token))
         self.detector.register_removal_callback(lambda reader: self.bridge.token_removed_signal.emit(reader))
+        self.detector.set_pkcs11_manager(self.pkcs11_mgr)
 
+        self.active_token: Optional[DetectedToken] = None
         self.is_dark_mode = True
         self.setWindowTitle("Dhanyah Crypto Utility - Unified Token Management & PKI Signer")
         self.resize(1100, 720)
@@ -311,6 +313,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, "server_widget"):
             self.server_widget.apply_theme(self.is_dark_mode)
 
+    def _reset_to_idle_ui(self):
+        """Reset UI to idle state waiting for token, without showing disconnect popups."""
+        self.banner.update_token(None)
+        self.dash_cert_table.set_certificates([])
+        self.cert_table.set_certificates([])
+        self.pin_widget.set_token_context("")
+        self.signer_widget.set_token_context("", 0, [])
+        self.status_bar.showMessage("Ready. Waiting for crypto token connection...")
+
+        # Update System Tray
+        if self.tray_icon:
+            self.tray_token_action.setText("Active Token: None")
+            self.tray_icon.setToolTip("Dhanyah Crypto Utility - Ready")
+        self.active_token = None
+
     def _on_simulation_changed(self, token_id: str):
         """Triggered when user toggles simulation mode from banner dropdown."""
         self.detector.set_simulation_mode(token_id if token_id else None)
@@ -318,19 +335,20 @@ class MainWindow(QMainWindow):
         if token:
             self._on_token_inserted_ui(token)
         else:
-            self._on_token_removed_ui("")
+            self._reset_to_idle_ui()
 
     def _check_initial_state(self):
-        """Check if any token is already plugged in at launch."""
+        """Check if any token is already plugged in at launch without false disconnect warning."""
         token = self.detector.get_primary_token()
         if token:
             self._on_token_inserted_ui(token)
         else:
-            self._on_token_removed_ui("")
+            self._reset_to_idle_ui()
 
     @Slot(object)
     def _on_token_inserted_ui(self, token: DetectedToken):
         logger.info(f"UI handling token inserted: {token}")
+        self.active_token = token
 
         # If a virtual remote token was mounted, detach it so physical hardware takes precedence
         if self.mesh_mgr and self.mesh_mgr.mounted_peer:
@@ -349,12 +367,15 @@ class MainWindow(QMainWindow):
 
         # Extract certificates
         certs = []
+        slot_id = None
         if token.is_simulated or token.token_id == "SIMULATED":
             certs = [self.cert_mgr.generate_simulated_dsc()]
         else:
             slots = self.pkcs11_mgr.get_slots_with_token(token.token_id)
-            slot_id = slots[0] if slots else 0
+            slot_id = slots[0] if slots else None
             certs = self.cert_mgr.get_token_certificates(token.token_id, slot=slot_id)
+
+        target_slot = slot_id if slot_id is not None else 0
 
         # Update certificate tables
         self.dash_cert_table.set_certificates(certs)
@@ -372,14 +393,14 @@ class MainWindow(QMainWindow):
         # Update PIN context
         self.pin_widget.set_token_context(
             token_id=token.token_id,
-            slot=slot_id,
+            slot=target_slot,
             is_simulated=token.is_simulated,
         )
 
         # Update Signer context
         self.signer_widget.set_token_context(
             token_id=token.token_id,
-            slot=slot_id,
+            slot=target_slot,
             certs=certs,
             is_simulated=token.is_simulated,
         )
@@ -409,20 +430,18 @@ class MainWindow(QMainWindow):
             logger.info("Token removed event ignored because a remote virtual token is actively mounted.")
             return
 
-        self.banner.update_token(None)
-        self.dash_cert_table.set_certificates([])
-        self.cert_table.set_certificates([])
-        self.pin_widget.set_token_context("")
-        self.signer_widget.set_token_context("", 0, [])
-        self.status_bar.showMessage("Ready. Waiting for crypto token connection...")
+        was_active = self.active_token is not None
+        old_token = self.active_token
 
-        # Update System Tray
-        if self.tray_icon:
-            self.tray_token_action.setText("Active Token: None")
-            self.tray_icon.setToolTip("Dhanyah Crypto Utility - Ready")
+        self._reset_to_idle_ui()
+
+        # Only notify via system tray if a token was actually active before being disconnected
+        if was_active and self.tray_icon:
+            token_desc = old_token.name if old_token else "Crypto Token"
+            slot_desc = reader_name if reader_name else (old_token.reader_name if old_token else "reader slot")
             self.tray_icon.showMessage(
                 "Crypto Token Disconnected",
-                f"Token disconnected from {reader_name if reader_name else 'reader slot'}.",
+                f"{token_desc} disconnected from {slot_desc}.",
                 QSystemTrayIcon.Warning,
                 2000,
             )

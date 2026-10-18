@@ -121,7 +121,12 @@ class TokenDetector:
         self._callbacks_remove: List[Callable[[str], None]] = []
         self._current_tokens: Dict[str, DetectedToken] = {}  # reader_name -> DetectedToken
         self._simulated_token: Optional[DetectedToken] = None
+        self._pkcs11_mgr: Any = None
         self._lock = threading.RLock()
+
+    def set_pkcs11_manager(self, pkcs11_mgr: Any):
+        """Register PKCS11Manager as secondary detection engine."""
+        self._pkcs11_mgr = pkcs11_mgr
 
     def register_insertion_callback(self, cb: Callable[[DetectedToken], None]):
         """Register callback for token insertion event."""
@@ -259,14 +264,39 @@ class TokenDetector:
                             is_simulated=False,
                         )
                 except Exception as card_err:
-                    # Reader exists but no card inserted or card busy
-                    logger.debug(f"Reader {reader_name} empty or busy: {card_err}")
+                    # Reader exists but card busy, locked by SCardSvr/CertPropSvc, or unpowered
+                    logger.debug(f"Reader {reader_name} connect exception: {card_err}")
+                    # Resilient fallback: For USB crypto dongles, presence of the reader indicates the token hardware is inserted
+                    profile = identify_token_by_reader_name(reader_name)
+                    if profile:
+                        detected_this_cycle[reader_name] = DetectedToken(
+                            token_id=profile["id"],
+                            name=profile["name"],
+                            vendor=profile["vendor"],
+                            reader_name=reader_name,
+                            atr="",
+                            fips_level=profile["fips_level"],
+                            is_simulated=False,
+                        )
 
         except ImportError:
-            # Fallback to WinSCard native ctypes if pyscard not loaded
-            self._poll_winscard_ctypes(detected_this_cycle)
+            pass
         except Exception as e:
             logger.debug(f"pyscard polling error: {e}")
+
+        # Fallback 1: Try WinSCard native ctypes if no tokens discovered via pyscard
+        if not detected_this_cycle and sys.platform == "win32":
+            try:
+                self._poll_winscard_ctypes(detected_this_cycle)
+            except Exception as e_win:
+                logger.debug(f"WinSCard fallback error: {e_win}")
+
+        # Fallback 2: Direct PKCS#11 hardware check if PC/SC service does not report readers
+        if not detected_this_cycle and self._pkcs11_mgr:
+            try:
+                self._poll_pkcs11(detected_this_cycle)
+            except Exception as e_p11:
+                logger.debug(f"PKCS#11 fallback error: {e_p11}")
 
         newly_inserted = []
         removed_readers_list = []
@@ -307,44 +337,68 @@ class TokenDetector:
                     logger.error(f"Error in removal callback: {e}")
 
     def _poll_winscard_ctypes(self, out_tokens: Dict[str, DetectedToken]):
-        """Direct WinSCard API fallback via ctypes for Windows."""
+        """Direct WinSCard API fallback via ctypes for Windows (checks both User & System scopes)."""
         import ctypes
         from ctypes import wintypes
 
         try:
             winscard = ctypes.windll.winscard
-            SCARD_SCOPE_USER = 0
-            hContext = wintypes.HANDLE()
-            res = winscard.SCardEstablishContext(SCARD_SCOPE_USER, None, None, ctypes.byref(hContext))
-            if res != 0:
-                return
+            for scope in [0, 2]:  # SCARD_SCOPE_USER, SCARD_SCOPE_SYSTEM
+                hContext = wintypes.HANDLE()
+                res = winscard.SCardEstablishContext(scope, None, None, ctypes.byref(hContext))
+                if res != 0:
+                    continue
 
-            cchReaders = wintypes.DWORD(0)
-            winscard.SCardListReadersA(hContext, None, None, ctypes.byref(cchReaders))
-            if cchReaders.value <= 1:
+                cchReaders = wintypes.DWORD(0)
+                res_check = winscard.SCardListReadersA(hContext, None, None, ctypes.byref(cchReaders))
+                if res_check == 0 and cchReaders.value > 1:
+                    readers_buf = ctypes.create_string_buffer(cchReaders.value)
+                    res = winscard.SCardListReadersA(hContext, None, readers_buf, ctypes.byref(cchReaders))
+                    if res == 0:
+                        raw_readers = readers_buf.raw.split(b"\x00")
+                        for r in raw_readers:
+                            if not r:
+                                continue
+                            r_str = r.decode("latin-1", errors="ignore")
+                            profile = identify_token_by_reader_name(r_str)
+                            if profile and r_str not in out_tokens:
+                                out_tokens[r_str] = DetectedToken(
+                                    token_id=profile["id"],
+                                    name=profile["name"],
+                                    vendor=profile["vendor"],
+                                    reader_name=r_str,
+                                    atr="",
+                                    fips_level=profile["fips_level"],
+                                    is_simulated=False,
+                                )
+
                 winscard.SCardReleaseContext(hContext)
-                return
-
-            readers_buf = ctypes.create_string_buffer(cchReaders.value)
-            res = winscard.SCardListReadersA(hContext, None, readers_buf, ctypes.byref(cchReaders))
-            if res == 0:
-                raw_readers = readers_buf.raw.split(b"\x00")
-                for r in raw_readers:
-                    if not r:
-                        continue
-                    r_str = r.decode("latin-1", errors="ignore")
-                    profile = identify_token_by_reader_name(r_str)
-                    if profile:
-                        out_tokens[r_str] = DetectedToken(
-                            token_id=profile["id"],
-                            name=profile["name"],
-                            vendor=profile["vendor"],
-                            reader_name=r_str,
-                            atr="",
-                            fips_level=profile["fips_level"],
-                            is_simulated=False,
-                        )
-
-            winscard.SCardReleaseContext(hContext)
+                if out_tokens:
+                    break
         except Exception as e:
             logger.debug(f"WinSCard ctypes error: {e}")
+
+    def _poll_pkcs11(self, out_tokens: Dict[str, DetectedToken]):
+        """Direct vendor PKCS#11 driver fallback if PC/SC service has not registered a smartcard reader slot."""
+        if not self._pkcs11_mgr:
+            return
+        for token_id, profile in TOKEN_PROFILES.items():
+            status = self._pkcs11_mgr.get_driver_status(token_id)
+            if status and status.is_loadable:
+                try:
+                    slots = self._pkcs11_mgr.get_slots_with_token(token_id)
+                    if slots:
+                        reader_tag = f"{profile['name']} (PKCS#11 Slot {slots[0]})"
+                        if reader_tag not in out_tokens:
+                            out_tokens[reader_tag] = DetectedToken(
+                                token_id=profile["id"],
+                                name=profile["name"],
+                                vendor=profile["vendor"],
+                                reader_name=reader_tag,
+                                atr="",
+                                fips_level=profile["fips_level"],
+                                is_simulated=False,
+                            )
+                except Exception as ex:
+                    logger.debug(f"PKCS#11 slot check error for {token_id}: {ex}")
+
