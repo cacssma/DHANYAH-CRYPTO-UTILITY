@@ -12,7 +12,7 @@ import subprocess
 from typing import Dict, List, Any, Optional
 
 # Application Version
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 
 # Loopback HTTP / WebSocket default configuration
 DEFAULT_LOOPBACK_PORT = 18200
