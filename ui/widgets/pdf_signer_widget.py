@@ -64,7 +64,10 @@ class PdfSignerWidget(QWidget):
         self.combo_certs.clear()
         self.combo_batch_certs.clear()
 
-        for c in certs:
+        user_certs = [c for c in certs if not getattr(c, "is_ca", False)]
+        signing_certs = user_certs if user_certs else certs
+
+        for c in signing_certs:
             pan_str = f" [PAN: {c.pan_number}]" if c.pan_number else ""
             tok_name = getattr(c, "token_name", "") or getattr(c, "token_id", "")
             tok_str = f" [{tok_name}]" if tok_name else ""
@@ -72,7 +75,7 @@ class PdfSignerWidget(QWidget):
             self.combo_certs.addItem(label, c)
             self.combo_batch_certs.addItem(label, c)
 
-        has_certs = len(certs) > 0
+        has_certs = len(signing_certs) > 0
         self.btn_sign_single.setEnabled(has_certs)
         self.btn_start_batch.setEnabled(has_certs and len(self._batch_files) > 0)
 
@@ -80,7 +83,9 @@ class PdfSignerWidget(QWidget):
             self.lbl_single_status.setText("No signing certificate available. Insert token or enable Demo mode.")
             self.lbl_single_status.setProperty("class", "BadgeWarning")
         else:
-            self.lbl_single_status.setText(f"Ready to sign with {len(certs)} certificate(s) loaded.")
+            ca_count = len(certs) - len(signing_certs)
+            ca_info = f" ({ca_count} CA trust cert(s) installed)" if ca_count > 0 else ""
+            self.lbl_single_status.setText(f"Ready to sign with {len(signing_certs)} signer certificate(s){ca_info}.")
             self.lbl_single_status.setProperty("class", "BadgeValid")
         self.lbl_single_status.setStyleSheet("")
 
@@ -504,7 +509,13 @@ class PdfSignerWidget(QWidget):
         self.lbl_single_status.setStyleSheet("")
 
         try:
-            target_token_id = getattr(cert, "token_id", None) or self._current_token_id or "SIMULATED"
+            cert_tid = getattr(cert, "token_id", None)
+            if self._current_token_id == "REMOTE_LAN" or cert_tid == "REMOTE_LAN":
+                target_token_id = "REMOTE_LAN"
+            elif cert_tid and cert_tid != "UNKNOWN":
+                target_token_id = cert_tid
+            else:
+                target_token_id = self._current_token_id or "SIMULATED"
             target_slot = getattr(cert, "slot", 0) or self._current_slot
             res: SignResult = self.signer.sign_pdf(
                 input_pdf_path=in_path,
@@ -652,7 +663,13 @@ class PdfSignerWidget(QWidget):
                 self.batch_table.setItem(row, 2, status_item)
 
         try:
-            target_token_id = getattr(cert, "token_id", None) or self._current_token_id or "SIMULATED"
+            cert_tid = getattr(cert, "token_id", None)
+            if self._current_token_id == "REMOTE_LAN" or cert_tid == "REMOTE_LAN":
+                target_token_id = "REMOTE_LAN"
+            elif cert_tid and cert_tid != "UNKNOWN":
+                target_token_id = cert_tid
+            else:
+                target_token_id = self._current_token_id or "SIMULATED"
             target_slot = getattr(cert, "slot", 0) or self._current_slot
             results = self.signer.sign_pdf_batch(
                 input_files=self._batch_files,

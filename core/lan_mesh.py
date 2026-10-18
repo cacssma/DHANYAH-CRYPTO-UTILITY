@@ -4,6 +4,7 @@ Enables zero-configuration peer discovery, remote token mounting, and
 cross-machine cryptographic signing across office LAN workstations.
 """
 
+import base64
 import json
 import logging
 import os
@@ -47,6 +48,10 @@ class LanCertificateInfo:
     valid_to: str = ""
     serial_hex: str = ""
     cert_der_b64: str = ""
+    token_id: str = "REMOTE_LAN"
+    slot: int = 0
+    is_ca: bool = False
+    token_name: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -62,6 +67,10 @@ class LanCertificateInfo:
             valid_to=d.get("valid_to", ""),
             serial_hex=d.get("serial_hex", ""),
             cert_der_b64=d.get("cert_der_b64", ""),
+            token_id=d.get("token_id", "REMOTE_LAN"),
+            slot=d.get("slot", 0),
+            is_ca=d.get("is_ca", False),
+            token_name=d.get("token_name", ""),
         )
 
     def to_parsed_certificate(self) -> Any:
@@ -72,15 +81,25 @@ class LanCertificateInfo:
         if self.cert_der_b64:
             try:
                 der = base64.b64decode(self.cert_der_b64)
-                return ParsedCertificate(der)
+                p = ParsedCertificate(
+                    cert_der=der,
+                    label=self.common_name,
+                    token_id="REMOTE_LAN",
+                    slot=self.slot,
+                    token_name=self.token_name or f"LAN Virtual ({self.common_name})",
+                )
+                return p
             except Exception as e:
                 logger.warning(f"Failed to parse remote DER bytes: {e}")
 
-        return CertManager.generate_simulated_dsc(
+        sim = CertManager.generate_simulated_dsc(
             cn=self.common_name,
             pan=self.pan_number or "ABCDE1234F",
             org=f"Remote Token ({self.cert_class})",
         )
+        sim.token_id = "REMOTE_LAN"
+        sim.token_name = self.token_name or f"LAN Virtual ({self.common_name})"
+        return sim
 
 
 @dataclass
@@ -255,7 +274,8 @@ class LanMeshManager:
             if peer.certificates and 0 <= cert_index < len(peer.certificates):
                 self.mounted_cert = peer.certificates[cert_index]
             else:
-                self.mounted_cert = None
+                user_certs = [c for c in peer.certificates if not c.is_ca]
+                self.mounted_cert = user_certs[0] if user_certs else (peer.certificates[0] if peer.certificates else None)
 
         logger.info(f"Mounted virtual remote token from {peer.display_name} ({peer.token_name})")
         return True
@@ -312,6 +332,10 @@ class LanMeshManager:
         pin: str,
         hash_hex: str,
         slot: int = 0,
+        token_id: str = "",
+        serial_hex: str = "",
+        alias: str = "",
+        algo: str = "SHA256",
     ) -> Dict[str, Any]:
         """
         Send a hash signature request to a remote workstation's Dhanyah instance.
@@ -322,6 +346,10 @@ class LanMeshManager:
             "pin": pin,
             "hash_hex": hash_hex,
             "slot": slot,
+            "token_id": token_id,
+            "serial_hex": serial_hex,
+            "alias": alias,
+            "algo": algo,
             "client_hostname": self.hostname,
             "client_ip": self.local_ip,
         }).encode("utf-8")
@@ -379,6 +407,9 @@ class LanMeshManager:
                 cert_payloads = []
                 for c in certs:
                     if hasattr(c, "common_name"):
+                        der_b64 = ""
+                        if hasattr(c, "cert_der") and c.cert_der:
+                            der_b64 = base64.b64encode(c.cert_der).decode("ascii")
                         cert_payloads.append({
                             "common_name": c.common_name,
                             "pan_number": getattr(c, "pan_number", ""),
@@ -388,6 +419,10 @@ class LanMeshManager:
                             "valid_to": c.valid_to.isoformat() if hasattr(c, "valid_to") and c.valid_to else "",
                             "serial_hex": getattr(c, "serial_number_hex", ""),
                             "token_name": getattr(c, "token_name", "") or (token.name if token else ""),
+                            "token_id": getattr(c, "token_id", "") or (token.token_id if token else ""),
+                            "slot": getattr(c, "slot", 0),
+                            "is_ca": getattr(c, "is_ca", False),
+                            "cert_der_b64": der_b64,
                         })
 
                 beacon_data = {

@@ -3,7 +3,7 @@
 ; Author: CA Akash J. Bhayani (mail@ca-akash.in | https://ca-akash.in)
 
 #define MyAppName "Dhanyah Crypto Utility"
-#define MyAppVersion "1.1.4"
+#define MyAppVersion "1.1.5"
 #define MyAppPublisher "CA Akash J. Bhayani"
 #define MyAppURL "https://ca-akash.in"
 #define MyAppRepoURL "https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY"

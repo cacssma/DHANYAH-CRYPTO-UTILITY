@@ -137,7 +137,12 @@ class ParsedCertificate:
         return None
 
     def _determine_cert_class(self) -> str:
-        """Determine Indian CCA Class (Class 3 / Class 2 / DGFT / Document Signer)."""
+        """Determine Indian CCA Class (Class 3 / Class 2 / DGFT / Document Signer / Root CA / Sub-CA)."""
+        if self.is_ca:
+            if self.common_name == self.issuer_cn or "root" in self.common_name.lower() or "cca india" in self.common_name.lower():
+                return "Root CA"
+            return "Sub-CA"
+
         combined = f"{self.common_name} {self.issuer_cn} {self.org_unit or ''} {self.organization or ''}".lower()
 
         # Inspect Certificate Policies extension for CCA OIDs

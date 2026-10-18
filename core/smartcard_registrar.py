@@ -547,11 +547,12 @@ class SmartCardRegistrar:
             return False, f"Registration error: {e}"
 
     @staticmethod
-    def sync_token_certificates_to_store(token_id: str, certs: list) -> Tuple[int, str]:
+    def sync_token_certificates_to_store(token_id: str, certs: list, is_remote: bool = False) -> Tuple[int, str]:
         """
-        Injects token certificates into Windows Personal store (CurrentUser\\My)
-        and explicitly binds CERT_KEY_PROV_INFO_PROP_ID so Adobe Acrobat, Chrome,
-        Edge, and Windows Certificate Manager display the private key badge.
+        Injects certificates into Windows Certificate Stores:
+        - Root CAs (e.g. CCA India) -> CurrentUser\\Root
+        - Intermediate Sub-CAs (e.g. IDSign sub CA) -> CurrentUser\\CA
+        - End-entity User DSCs -> CurrentUser\\My (with CSP private key link if local token)
         """
         import ctypes
         from ctypes import wintypes
@@ -559,7 +560,7 @@ class SmartCardRegistrar:
         if not certs:
             return 0, "No certificates provided to synchronize."
 
-        # Map token_id to appropriate CSP provider
+        # Map token_id to appropriate CSP provider for physical local tokens
         tid_lower = (token_id or "").lower()
         if "hyp" in tid_lower or "2003" in tid_lower:
             csp_name = "HyperPKI HYP2003 CSP India v3.3"
@@ -620,24 +621,41 @@ class SmartCardRegistrar:
             X509_ASN_ENCODING = 0x00000001
             PKCS_7_ASN_ENCODING = 0x00010000
 
-            hStore = crypt32.CertOpenStore(
-                CERT_STORE_PROV_SYSTEM_W,
-                0,
-                None,
-                CERT_SYSTEM_STORE_CURRENT_USER,
-                ctypes.c_wchar_p("MY"),
-            )
-            if not hStore:
-                return 0, "Failed to open CurrentUser\\My certificate store."
+            opened_stores = {}
+
+            def get_store(name: str):
+                if name not in opened_stores:
+                    h = crypt32.CertOpenStore(
+                        CERT_STORE_PROV_SYSTEM_W,
+                        0,
+                        None,
+                        CERT_SYSTEM_STORE_CURRENT_USER,
+                        ctypes.c_wchar_p(name),
+                    )
+                    opened_stores[name] = h
+                return opened_stores[name]
 
             synced_count = 0
+            ca_count = 0
             try:
                 for cert in certs:
                     der = getattr(cert, "cert_der", None)
                     if not der:
                         continue
 
-                    container_name = getattr(cert, "common_name", None) or getattr(cert, "label", "DSC Certificate")
+                    is_ca = getattr(cert, "is_ca", False)
+                    cn = getattr(cert, "common_name", "") or ""
+                    issuer_cn = getattr(cert, "issuer_cn", "") or ""
+
+                    # Determine target store: CA store for certifying authorities, MY for end-user DSCs
+                    if is_ca:
+                        target_store_name = "CA"
+                    else:
+                        target_store_name = "MY"
+
+                    hStore = get_store(target_store_name)
+                    if not hStore:
+                        continue
 
                     pContext = crypt32.CertCreateCertificateContext(
                         X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
@@ -648,21 +666,24 @@ class SmartCardRegistrar:
                         continue
 
                     try:
-                        prov_info = CRYPT_KEY_PROV_INFO()
-                        prov_info.pwszContainerName = container_name
-                        prov_info.pwszProvName = csp_name
-                        prov_info.dwProvType = 1  # PROV_RSA_FULL
-                        prov_info.dwFlags = 0
-                        prov_info.cProvParam = 0
-                        prov_info.rgProvParam = None
-                        prov_info.dwKeySpec = 2  # AT_SIGNATURE
+                        # Only link local physical hardware CSP to non-CA user certificates
+                        if not is_ca and not is_remote and token_id != "REMOTE_LAN":
+                            container_name = getattr(cert, "common_name", None) or getattr(cert, "label", "DSC Certificate")
+                            prov_info = CRYPT_KEY_PROV_INFO()
+                            prov_info.pwszContainerName = container_name
+                            prov_info.pwszProvName = csp_name
+                            prov_info.dwProvType = 1  # PROV_RSA_FULL
+                            prov_info.dwFlags = 0
+                            prov_info.cProvParam = 0
+                            prov_info.rgProvParam = None
+                            prov_info.dwKeySpec = 2  # AT_SIGNATURE
 
-                        crypt32.CertSetCertificateContextProperty(
-                            pContext,
-                            CERT_KEY_PROV_INFO_PROP_ID,
-                            0,
-                            ctypes.byref(prov_info),
-                        )
+                            crypt32.CertSetCertificateContextProperty(
+                                pContext,
+                                CERT_KEY_PROV_INFO_PROP_ID,
+                                0,
+                                ctypes.byref(prov_info),
+                            )
 
                         if crypt32.CertAddCertificateContextToStore(
                             hStore,
@@ -670,16 +691,22 @@ class SmartCardRegistrar:
                             CERT_STORE_ADD_REPLACE_EXISTING,
                             None,
                         ):
-                            synced_count += 1
+                            if is_ca:
+                                ca_count += 1
+                            else:
+                                synced_count += 1
                     finally:
                         crypt32.CertFreeCertificateContext(pContext)
             finally:
-                crypt32.CertCloseStore(hStore, 0)
+                for h in opened_stores.values():
+                    if h:
+                        crypt32.CertCloseStore(h, 0)
 
             SmartCardRegistrar.pulse_windows_certificates()
 
-            logger.info(f"Synchronized and key-linked {synced_count} certificates into Windows Personal Store.")
-            return synced_count, f"Successfully synchronized and key-linked {synced_count} certificates into Windows Store."
+            msg = f"Successfully synchronized {synced_count} user cert(s) and {ca_count} CA trust cert(s) into Windows Stores."
+            logger.info(msg)
+            return synced_count + ca_count, msg
 
         except Exception as e:
             logger.exception("Failed to sync certificates to Windows Store")

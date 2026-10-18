@@ -46,10 +46,10 @@ In India, Chartered Accountants, Tax Professionals, Company Secretaries, and Bus
 
 ## 🚀 Quick Start (Pre-built Windows Installer)
 
-### Download & Install (v1.1.3)
-[![Download Dhanyah Crypto Utility v1.1.3](https://img.shields.io/badge/Download-Installer%20v1.1.3%20(.exe)-blue?style=for-the-badge&logo=windows)](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.1.3/DhanyahCryptoUtility_Setup_v1.1.3.exe)
+### Download & Install (v1.1.5)
+[![Download Dhanyah Crypto Utility v1.1.5](https://img.shields.io/badge/Download-Installer%20v1.1.5%20(.exe)-blue?style=for-the-badge&logo=windows)](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.1.5/DhanyahCryptoUtility_Setup_v1.1.5.exe)
 
-1. Download **[DhanyahCryptoUtility_Setup_v1.1.3.exe](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.1.3/DhanyahCryptoUtility_Setup_v1.1.3.exe)** from the [Releases](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases) page or from the `releases/` directory in this repository.
+1. Download **[DhanyahCryptoUtility_Setup_v1.1.5.exe](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases/download/v1.1.5/DhanyahCryptoUtility_Setup_v1.1.5.exe)** from the [Releases](https://github.com/cacssma/DHANYAH-CRYPTO-UTILITY/releases) page or from the `releases/` directory in this repository.
 2. Run the setup installer (Administrator privileges required to register Windows Smart Card MiniDrivers & 32-bit SysWOW64 DLLs).
 3. Plug in any of the 4 supported USB tokens — the application will automatically detect the token, display its certificates, and allow safe PIN operations and signing.
 

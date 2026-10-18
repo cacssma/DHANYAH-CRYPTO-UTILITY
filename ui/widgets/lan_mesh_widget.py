@@ -195,6 +195,38 @@ class LanMeshWidget(QWidget):
         self.pc_layout.addLayout(self.peer_cards_container)
 
         self.main_layout.addWidget(peers_card)
+
+        # -------------------------------------------------------------
+        # CARD 4: Enterprise Signing & CA Trust Chain Guidance Box
+        # -------------------------------------------------------------
+        guidance_card = QFrame()
+        guidance_card.setProperty("class", "CardFrame")
+        gc_layout = QVBoxLayout(guidance_card)
+        gc_layout.setContentsMargins(16, 14, 16, 14)
+        gc_layout.setSpacing(8)
+
+        lbl_guide_title = QLabel("💡 SIGNING WITH NETWORK DSC MESH TOKENS")
+        lbl_guide_title.setProperty("class", "CardTitle")
+        gc_layout.addWidget(lbl_guide_title)
+
+        lbl_guide_body = QLabel(
+            "<b>1. Built-in PDF Document Signer:</b> To sign PDF files using a network-mounted token over LAN, use Dhanyah's "
+            "<b>'PDF Signer'</b> tab. It communicates directly with the remote workstation's hardware token to generate "
+            "standard, legally valid Adobe PAdES signatures without requiring physical USB dongles on this computer.<br><br>"
+            "<b>2. Web Portals & Gateways:</b> All browser signing portals (MCA V3, GST, Income Tax, EPFO, ICEGATE, e-Tenders) "
+            "and local signing gateways (emSigner, emBridge) work automatically over LAN via loopback.<br><br>"
+            "<b>3. CCA Root & Sub-CA Trust Chain:</b> When mounting a remote token, Dhanyah automatically installs the "
+            "certifying authority chain (CCA India 2022 & Intermediate Sub-CAs) into the Windows Trusted Root and CA stores "
+            "so that all signatures are automatically recognized with green checkmarks.<br><br>"
+            "<b>4. Adobe Acrobat Internal Sign Tool:</b> Adobe Acrobat's internal 'Digitally Sign' button directly calls "
+            "the local PC's hardware driver (which reports error 2148073501 if no USB dongle is physically plugged in locally). "
+            "Always use Dhanyah's built-in PDF Signer tab for network tokens."
+        )
+        lbl_guide_body.setWordWrap(True)
+        lbl_guide_body.setProperty("class", "SubText")
+        gc_layout.addWidget(lbl_guide_body)
+
+        self.main_layout.addWidget(guidance_card)
         self.main_layout.addStretch()
 
         scroll.setWidget(content)
@@ -303,6 +335,23 @@ class LanMeshWidget(QWidget):
                 lbl_shared = QLabel("Sharing Disabled by Host")
                 lbl_shared.setProperty("class", "BadgeWarning")
                 token_box.addWidget(lbl_shared)
+            elif peer.has_token:
+                is_peer_mounted = bool(
+                    self.mesh_mgr.mounted_peer and self.mesh_mgr.mounted_peer.peer_id == peer.peer_id
+                )
+                if is_peer_mounted:
+                    btn_mount_full = QPushButton("✔ FULL TOKEN & CA CHAIN MOUNTED")
+                    btn_mount_full.setProperty("class", "SuccessButton")
+                    btn_mount_full.setEnabled(False)
+                    btn_mount_full.setMinimumHeight(32)
+                else:
+                    btn_mount_full = QPushButton("⚡ Mount Full Token & CA Chain")
+                    btn_mount_full.setProperty("class", "PrimaryButton")
+                    btn_mount_full.setMinimumHeight(32)
+                    btn_mount_full.clicked.connect(
+                        lambda _=False, p_id=peer.peer_id: self._mount_peer_token(p_id, -1)
+                    )
+                token_box.addWidget(btn_mount_full)
 
             card_layout.addLayout(token_box)
 
@@ -315,39 +364,56 @@ class LanMeshWidget(QWidget):
                     cf_layout.setContentsMargins(0, 4, 0, 0)
 
                     c_info = QVBoxLayout()
-                    pan_str = f" [PAN: {c.pan_number}]" if c.pan_number else ""
-                    lbl_c_name = QLabel(f"<b>{c.common_name}</b> ({c.cert_class}){pan_str}")
-                    lbl_c_name.setProperty("class", "ValueText")
-                    lbl_c_exp = QLabel(f"Issued by: {c.issuer} | Valid to: {c.valid_to[:10] if c.valid_to else 'N/A'}")
-                    lbl_c_exp.setProperty("class", "SubText")
-                    c_info.addWidget(lbl_c_name)
-                    c_info.addWidget(lbl_c_exp)
-                    cf_layout.addLayout(c_info)
+                    is_ca = getattr(c, "is_ca", False)
 
-                    cf_layout.addStretch()
+                    if is_ca:
+                        ca_type = "ROOT CA" if ("root" in c.common_name.lower() or "cca india" in c.common_name.lower() or c.common_name == c.issuer) else "SUB-CA"
+                        lbl_c_name = QLabel(f"🏛️ <b>{c.common_name}</b> <span style='color: #38bdf8;'>[{ca_type} TRUST CHAIN]</span>")
+                        lbl_c_name.setProperty("class", "ValueText")
+                        store_name = "Root" if ca_type == "ROOT CA" else "CA"
+                        lbl_c_exp = QLabel(f"Issued by: {c.issuer} | Auto-installed into Windows {store_name} Store upon mount")
+                        lbl_c_exp.setProperty("class", "SubText")
+                        c_info.addWidget(lbl_c_name)
+                        c_info.addWidget(lbl_c_exp)
+                        cf_layout.addLayout(c_info)
+                        cf_layout.addStretch()
 
-                    # Check if this peer is currently mounted
-                    is_this_mounted = (
-                        self.mesh_mgr.mounted_peer
-                        and self.mesh_mgr.mounted_peer.peer_id == peer.peer_id
-                        and self.mesh_mgr.mounted_cert
-                        and self.mesh_mgr.mounted_cert.common_name == c.common_name
-                    )
-
-                    if is_this_mounted:
-                        btn_mount = QPushButton("✔ ACTIVE MOUNTED")
-                        btn_mount.setProperty("class", "SuccessButton")
-                        btn_mount.setEnabled(False)
-                        btn_mount.setMinimumHeight(32)
-                        cf_layout.addWidget(btn_mount)
+                        lbl_ca_badge = QLabel(f"✔ Trusted {ca_type}")
+                        lbl_ca_badge.setProperty("class", "BadgeValid")
+                        cf_layout.addWidget(lbl_ca_badge)
                     else:
-                        btn_mount = QPushButton("⚡ Mount for Signing on this PC")
-                        btn_mount.setProperty("class", "PrimaryButton")
-                        btn_mount.setMinimumHeight(32)
-                        btn_mount.clicked.connect(
-                            lambda _=False, p_id=peer.peer_id, c_idx=idx: self._mount_peer_token(p_id, c_idx)
+                        pan_str = f" [PAN: {c.pan_number}]" if c.pan_number else ""
+                        lbl_c_name = QLabel(f"👤 <b>{c.common_name}</b> ({c.cert_class}){pan_str} <span style='color: #4ade80;'>[USER DSC]</span>")
+                        lbl_c_name.setProperty("class", "ValueText")
+                        lbl_c_exp = QLabel(f"Issued by: {c.issuer} | Valid to: {c.valid_to[:10] if c.valid_to else 'N/A'}")
+                        lbl_c_exp.setProperty("class", "SubText")
+                        c_info.addWidget(lbl_c_name)
+                        c_info.addWidget(lbl_c_exp)
+                        cf_layout.addLayout(c_info)
+                        cf_layout.addStretch()
+
+                        # Check if this cert is currently mounted
+                        is_this_mounted = (
+                            self.mesh_mgr.mounted_peer
+                            and self.mesh_mgr.mounted_peer.peer_id == peer.peer_id
+                            and self.mesh_mgr.mounted_cert
+                            and self.mesh_mgr.mounted_cert.common_name == c.common_name
                         )
-                        cf_layout.addWidget(btn_mount)
+
+                        if is_this_mounted:
+                            btn_mount = QPushButton("✔ ACTIVE SIGNER")
+                            btn_mount.setProperty("class", "SuccessButton")
+                            btn_mount.setEnabled(False)
+                            btn_mount.setMinimumHeight(32)
+                            cf_layout.addWidget(btn_mount)
+                        else:
+                            btn_mount = QPushButton("⚡ Mount as Primary Signer")
+                            btn_mount.setProperty("class", "PrimaryButton")
+                            btn_mount.setMinimumHeight(32)
+                            btn_mount.clicked.connect(
+                                lambda _=False, p_id=peer.peer_id, c_idx=idx: self._mount_peer_token(p_id, c_idx)
+                            )
+                            cf_layout.addWidget(btn_mount)
 
                     card_layout.addWidget(cert_frame)
 
@@ -365,13 +431,18 @@ class LanMeshWidget(QWidget):
             self.remote_token_mounted.emit(peer, cert)
 
             pan_msg = f"\nPAN Number: {cert.pan_number}" if cert and cert.pan_number else ""
+            signer_name = cert.common_name if cert else peer.token_name
+            ca_count = sum(1 for c in peer.certificates if getattr(c, "is_ca", False))
+            ca_msg = f"\n• Synchronized {ca_count} Certifying Authority (CCA India & Sub-CA) certificates into Windows Trusted Root & CA stores." if ca_count else ""
+
             QMessageBox.information(
                 self,
-                "Remote Token Mounted",
+                "Remote Token & CA Trust Chain Mounted",
                 f"Successfully mounted remote token from:\n{peer.display_name}\n\n"
-                f"Signer: {cert.common_name if cert else peer.token_name}{pan_msg}\n\n"
+                f"Active Signer: {signer_name}{pan_msg}{ca_msg}\n\n"
                 f"• Built-in PDF Document Signer will now use this remote token.\n"
-                f"• emSigner, emBridge, and government web portals (MCA, GST, ITD) will sign using this token via local loopback.",
+                f"• emSigner, emBridge, and government web portals (MCA, GST, ITD) will sign using this token via local loopback.\n\n"
+                f"💡 Tip for PDF Signing: Use Dhanyah's built-in 'PDF Signer' tab to sign PDF documents over LAN.",
             )
 
     def _unmount_current(self):

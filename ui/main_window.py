@@ -518,6 +518,20 @@ class MainWindow(QMainWindow):
         self.dash_cert_table.set_certificates(parsed_certs)
         self.cert_table.set_certificates(parsed_certs)
 
+        # Synchronize certificates to Windows Stores:
+        # - Root CAs (e.g. CCA India 2022) -> CurrentUser\Root
+        # - Intermediate Sub-CAs (e.g. IDSign sub CA) -> CurrentUser\CA
+        # - End-user DSCs -> CurrentUser\My (with is_remote=True, so physical CSP driver is NOT linked)
+        if parsed_certs:
+            try:
+                from core.smartcard_registrar import SmartCardRegistrar
+                synced_count, sync_msg = SmartCardRegistrar.sync_token_certificates_to_store(
+                    "REMOTE_LAN", parsed_certs, is_remote=True
+                )
+                logger.info(f"Mounted Remote Token Store Sync: {sync_msg}")
+            except Exception as e_sync:
+                logger.warning(f"Could not auto-sync remote certificates to Windows store: {e_sync}")
+
         # Update PIN context
         self.pin_widget.set_token_context(
             token_id="REMOTE_LAN",

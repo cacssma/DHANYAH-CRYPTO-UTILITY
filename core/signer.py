@@ -125,6 +125,7 @@ class TokenSigner:
         algo: str = "SHA256",
         is_simulated: bool = False,
         active_session: Optional[Any] = None,
+        cert: Optional[Any] = None,
     ) -> bytes:
         """
         Signs a SHA-256 or SHA-1 hash or DigestInfo using the onboard RSA private key.
@@ -137,11 +138,20 @@ class TokenSigner:
         if token_id == "REMOTE_LAN":
             if hasattr(self, "lan_mesh_mgr") and self.lan_mesh_mgr and self.lan_mesh_mgr.mounted_peer:
                 peer = self.lan_mesh_mgr.mounted_peer
+                mounted_cert = getattr(self.lan_mesh_mgr, "mounted_cert", None)
+                target_serial = getattr(cert, "serial_number_hex", "") if cert else (getattr(mounted_cert, "serial_hex", "") if mounted_cert else "")
+                target_alias = getattr(cert, "common_name", "") if cert else (getattr(mounted_cert, "common_name", "") if mounted_cert else "")
+                token_arg = getattr(cert, "token_id", "") if cert and getattr(cert, "token_id", "") != "REMOTE_LAN" else ""
                 res = self.lan_mesh_mgr.sign_remote_hash(
                     peer_ip=peer.ip,
                     peer_port=peer.port,
                     pin=pin,
                     hash_hex=data_hash.hex(),
+                    slot=slot,
+                    token_id=token_arg,
+                    serial_hex=target_serial,
+                    alias=target_alias,
+                    algo=algo,
                 )
                 if not res.get("success"):
                     raise RuntimeError(res.get("error", "Remote LAN signing failed"))
@@ -784,6 +794,7 @@ class TokenSigner:
             ck_id=cert.ck_id,
             is_simulated=is_simulated,
             active_session=active_session,
+            cert=cert,
         )
 
         # SignerInfo structure
